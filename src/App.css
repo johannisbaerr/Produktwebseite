@@ -118,6 +118,10 @@ footer small { font: 11px 'DM Sans'; margin-left: 15px; }
 .admin-product-main p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 13px; margin: 6px 0 8px; }
 .admin-meta { color: var(--muted); font: 10px var(--mono); }
 .admin-product-actions { display: flex; gap: 14px; align-items: center; }
+.reorder-actions { display: flex; gap: 4px; }
+.reorder-button { width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); cursor: pointer; }
+.reorder-button:hover:not(:disabled) { background: var(--blue-soft); border-color: #cbdff3; }
+.reorder-button:disabled { opacity: .3; cursor: default; }
 .edit-button, .delete-button { border: 0; background: transparent; font-size: 12px; }
 .edit-button { color: var(--ink); }
 .delete-button { color: var(--blue-strong); }
@@ -157,6 +161,7 @@ textarea { resize: vertical; min-height: 110px; }
   .product-price { align-items: flex-start; }
   .admin-product { flex-direction: column; align-items: flex-start; }
   .admin-thumb { width: 100%; height: 200px; }
+  .admin-product-actions { width: 100%; flex-wrap: wrap; }
   .form-row { grid-template-columns: 1fr; }
 }
 

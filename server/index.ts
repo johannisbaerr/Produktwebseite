@@ -91,6 +91,24 @@ app.get('/api/admin/products', auth, async (req, res) => {
   res.json((data as ProductRow[]).map(productPayload))
 })
 
+app.post('/api/admin/products/reorder', auth, async (req, res) => {
+  const productId = Number(req.body?.productId)
+  const neighborId = Number(req.body?.neighborId)
+  if (!Number.isInteger(productId) || !Number.isInteger(neighborId) || productId === neighborId) {
+    return res.status(400).json({ error: 'Ungültige Produktreihenfolge.' })
+  }
+  const { data: products, error: lookupError } = await supabase.from('products').select('id,updated_at').in('id', [productId, neighborId])
+  if (lookupError) return res.status(500).json({ error: 'Reihenfolge konnte nicht geladen werden.' })
+  const current = products?.find((product) => product.id === productId)
+  const neighbor = products?.find((product) => product.id === neighborId)
+  if (!current || !neighbor) return res.status(404).json({ error: 'Produkt nicht gefunden.' })
+  const { error: currentError } = await supabase.from('products').update({ updated_at: neighbor.updated_at }).eq('id', productId)
+  if (currentError) return res.status(500).json({ error: 'Reihenfolge konnte nicht gespeichert werden.' })
+  const { error: neighborError } = await supabase.from('products').update({ updated_at: current.updated_at }).eq('id', neighborId)
+  if (neighborError) return res.status(500).json({ error: 'Reihenfolge konnte nicht gespeichert werden.' })
+  res.json({ ok: true })
+})
+
 const validateProduct = (body: Record<string, unknown>) => {
   const name = String(body.name || '').trim()
   const description = String(body.description || '').trim()
