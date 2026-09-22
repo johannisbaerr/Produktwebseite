@@ -125,7 +125,8 @@ footer small { font: 11px 'DM Sans'; margin-left: 15px; }
 .login-page { min-height: 100vh; background: linear-gradient(135deg, var(--blue-deep), var(--ink-soft)); color: #fff; padding: 36px 5vw; }
 .back-link { background: transparent; border: 0; color: #dfeaf5; font-size: 12px; }
 .login-box { width: min(420px, 100%); margin: 13vh auto 0; }
-.login-symbol { display: grid; place-content: center; width: 68px; height: 68px; border-radius: 50%; background: rgba(255,255,255,.08); color: #fff; font-size: 24px; letter-spacing: -.08em; margin-bottom: 24px; }
+.login-symbol { display: grid; place-content: center; width: auto; min-width: 68px; height: 68px; padding: 0 16px; border-radius: 18px; background: #fff; color: var(--ink); font-size: 21px; font-weight: 700; letter-spacing: -.08em; margin-bottom: 24px; }
+.login-intro { max-width: 340px; margin: -22px 0 32px; color: rgba(255,255,255,.78); font-size: 14px; line-height: 1.5; }
 .login-note { color: rgba(255,255,255,.8); font-size: 12px; }
 .product-form, .modal, .login-box form { background: var(--panel); border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow); }
 .product-form { padding: 24px; display: grid; gap: 18px; }
