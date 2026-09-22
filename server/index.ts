@@ -97,15 +97,20 @@ app.post('/api/admin/products/reorder', auth, async (req, res) => {
   if (!Number.isInteger(productId) || !Number.isInteger(neighborId) || productId === neighborId) {
     return res.status(400).json({ error: 'Ungültige Produktreihenfolge.' })
   }
-  const { data: products, error: lookupError } = await supabase.from('products').select('id,updated_at').in('id', [productId, neighborId])
+  const { data: products, error: lookupError } = await supabase.from('products').select('id,updated_at').order('updated_at', { ascending: false })
   if (lookupError) return res.status(500).json({ error: 'Reihenfolge konnte nicht geladen werden.' })
-  const current = products?.find((product) => product.id === productId)
-  const neighbor = products?.find((product) => product.id === neighborId)
-  if (!current || !neighbor) return res.status(404).json({ error: 'Produkt nicht gefunden.' })
-  const { error: currentError } = await supabase.from('products').update({ updated_at: neighbor.updated_at }).eq('id', productId)
-  if (currentError) return res.status(500).json({ error: 'Reihenfolge konnte nicht gespeichert werden.' })
-  const { error: neighborError } = await supabase.from('products').update({ updated_at: current.updated_at }).eq('id', neighborId)
-  if (neighborError) return res.status(500).json({ error: 'Reihenfolge konnte nicht gespeichert werden.' })
+  const ordered = [...(products || [])]
+  const currentIndex = ordered.findIndex((product) => product.id === productId)
+  const neighborIndex = ordered.findIndex((product) => product.id === neighborId)
+  if (currentIndex === -1 || neighborIndex === -1 || Math.abs(currentIndex - neighborIndex) !== 1) {
+    return res.status(400).json({ error: 'Ungültige Produktreihenfolge.' })
+  }
+  ;[ordered[currentIndex], ordered[neighborIndex]] = [ordered[neighborIndex], ordered[currentIndex]]
+  const baseTime = Date.now() + ordered.length * 1000
+  for (const [index, product] of ordered.entries()) {
+    const { error } = await supabase.from('products').update({ updated_at: new Date(baseTime - index * 1000).toISOString() }).eq('id', product.id)
+    if (error) return res.status(500).json({ error: 'Reihenfolge konnte nicht gespeichert werden.' })
+  }
   res.json({ ok: true })
 })
 
