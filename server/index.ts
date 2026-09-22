@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs'
 import multer from 'multer'
 import crypto from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
+import { DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME, ensureDefaultAdmin } from './admin.ts'
 
 const app = express()
 const port = Number(process.env.PORT || 3001)
@@ -13,6 +14,24 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 const storageBucket = process.env.SUPABASE_STORAGE_BUCKET || 'product-images'
 if (!supabaseServiceKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY fehlt. Hinterlege den geheimen Supabase Service Role Key als Umgebungsvariable.')
 const supabase = createClient(supabaseUrl, supabaseServiceKey, { auth: { autoRefreshToken: false, persistSession: false } })
+
+const initializeDefaultAdmin = async () => {
+  try {
+    await ensureDefaultAdmin(supabase, {
+      username: DEFAULT_ADMIN_USERNAME,
+      password: DEFAULT_ADMIN_PASSWORD,
+      passwordHash: process.env.ADMIN_PASSWORD_HASH,
+    })
+    console.log('Default admin ensured successfully.')
+  } catch (error) {
+    console.error('Default admin setup failed:', error)
+  }
+}
+
+const startServer = async () => {
+  await initializeDefaultAdmin()
+  app.listen(port, '0.0.0.0', () => console.log(`Product API running on http://0.0.0.0:${port}`))
+}
 
 app.use(express.json({ limit: '1mb' }))
 app.use(cookieParser())
@@ -48,7 +67,11 @@ app.get('/api/products', async (_req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   const username = String(req.body?.username || '').trim()
   const password = String(req.body?.password || '')
-  const { data: admin } = await supabase.from('admins').select('id,password_hash').eq('username', username).maybeSingle<{ id: number; password_hash: string }>()
+  const { data: admin, error: adminError } = await supabase.from('admins').select('id,password_hash').eq('username', username).maybeSingle<{ id: number; password_hash: string }>()
+  if (adminError) {
+    console.error('Admin lookup failed:', adminError.message)
+    return res.status(500).json({ error: 'Anmeldung ist momentan nicht verfügbar.' })
+  }
   if (!admin || !bcrypt.compareSync(password, admin.password_hash)) return res.status(401).json({ error: 'Benutzername oder Passwort ist falsch' })
   const token = crypto.randomBytes(32).toString('hex')
   const { error } = await supabase.from('sessions').insert({ token, admin_id: admin.id, expires_at: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString() })
@@ -135,4 +158,4 @@ app.delete('/api/admin/products/:id', auth, async (req, res) => {
   res.json({ ok: true })
 })
 
-app.listen(port, '0.0.0.0', () => console.log(`Product API running on http://0.0.0.0:${port}`))
+void startServer()
