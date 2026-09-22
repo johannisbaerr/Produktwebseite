@@ -1,5 +1,6 @@
 import express from 'express'
 import cookieParser from 'cookie-parser'
+import cors from 'cors'
 import bcrypt from 'bcryptjs'
 import multer from 'multer'
 import crypto from 'node:crypto'
@@ -15,6 +16,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey, { auth: { autoRef
 
 app.use(express.json({ limit: '1mb' }))
 app.use(cookieParser())
+app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true }))
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -51,7 +53,7 @@ app.post('/api/auth/login', async (req, res) => {
   const token = crypto.randomBytes(32).toString('hex')
   const { error } = await supabase.from('sessions').insert({ token, admin_id: admin.id, expires_at: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString() })
   if (error) return res.status(500).json({ error: 'Anmeldung konnte nicht gestartet werden.' })
-  res.cookie('admin_session', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 8 * 60 * 60 * 1000 })
+  res.cookie('admin_session', token, { httpOnly: true, sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 8 * 60 * 60 * 1000 })
   res.json({ username })
 })
 app.post('/api/auth/logout', async (req, res) => { if (req.cookies.admin_session) await supabase.from('sessions').delete().eq('token', req.cookies.admin_session); res.clearCookie('admin_session').json({ ok: true }) })

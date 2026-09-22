@@ -7,9 +7,10 @@ type Product = { id: number; name: string; description: string; priceCents: numb
 
 const currency = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' })
 const emptyForm = { name: '', description: '', price: '', stock: '', status: 'active' as 'active' | 'unlisted' }
+const apiBaseUrl = import.meta.env.VITE_API_URL || ''
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, options)
+  const response = await fetch(`${apiBaseUrl}${url}`, { ...options, credentials: 'include' })
   const data = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(data.error || 'Etwas ist schiefgelaufen.')
   return data
