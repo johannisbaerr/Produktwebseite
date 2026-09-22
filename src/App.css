@@ -130,6 +130,10 @@ footer small { font: 11px 'DM Sans'; margin-left: 15px; }
 .login-note { color: rgba(255,255,255,.8); font-size: 12px; }
 .product-form, .modal, .login-box form { background: var(--panel); border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow); }
 .product-form { padding: 24px; display: grid; gap: 18px; }
+.login-box form { padding: 28px; display: grid; gap: 18px; color: var(--ink); }
+.login-box form label { color: var(--muted); font-size: 11px; }
+.login-box form input { color: var(--ink); background: #fff; border-color: var(--line); }
+.login-box form .primary-button { width: 100%; margin-top: 4px; }
 .form-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .form-header h2 { margin: 0; font-size: 27px; }
 .icon-button { width: 34px; height: 34px; border: 1px solid var(--line); background: white; border-radius: 50%; font-size: 22px; }
