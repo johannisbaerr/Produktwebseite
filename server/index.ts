@@ -96,11 +96,11 @@ const validateProduct = (body: Record<string, unknown>) => {
   const description = String(body.description || '').trim()
   const priceCents = Number(body.priceCents)
   const stock = Number(body.stock)
-  const status = body.status === 'active' ? 'active' : 'unlisted'
   if (!name || name.length > 160) return 'Bitte einen gültigen Produktnamen eingeben.'
   if (description.length > 5000) return 'Die Beschreibung darf höchstens 5000 Zeichen enthalten.'
   if (!Number.isInteger(priceCents) || priceCents < 0) return 'Der Preis muss ein gültiger Betrag sein.'
   if (!Number.isInteger(stock) || stock < 0) return 'Der Lagerbestand muss eine ganze Zahl ab 0 sein.'
+  const status = stock > 0 && body.status === 'active' ? 'active' : 'unlisted'
   return { name, description, priceCents, stock, status }
 }
 
