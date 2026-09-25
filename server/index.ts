@@ -155,7 +155,7 @@ app.patch('/api/admin/products/:id', auth, upload.array('images', 8), async (req
   if (typeof data === 'string') return res.status(400).json({ error: data })
   const { data: current } = await supabase.from('products').select('id').eq('id', id).maybeSingle()
   if (!current) return res.status(404).json({ error: 'Produkt nicht gefunden.' })
-  const { error } = await supabase.from('products').update({ name: data.name, description: data.description, price_cents: data.priceCents, stock: data.stock, status: data.status, updated_at: new Date().toISOString() }).eq('id', id)
+  const { error } = await supabase.from('products').update({ name: data.name, description: data.description, price_cents: data.priceCents, stock: data.stock, status: data.status }).eq('id', id)
   if (error) return res.status(500).json({ error: 'Produkt konnte nicht gespeichert werden.' })
   const files = (req.files as Express.Multer.File[]) || []
   if (files.length) { const { data: last } = await supabase.from('product_images').select('sort_order').eq('product_id', id).order('sort_order', { ascending: false }).limit(1).maybeSingle<{ sort_order: number }>(); try { await uploadImages(id, files, (last?.sort_order ?? -1) + 1) } catch { return res.status(500).json({ error: 'Neue Produktbilder konnten nicht gespeichert werden.' }) } }
