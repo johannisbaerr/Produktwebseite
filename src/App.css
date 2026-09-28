@@ -106,8 +106,10 @@ footer small { font: 11px 'DM Sans'; margin-left: 15px; }
 .search-box span { font-size: 22px; }
 .search-box input { border: 0; background: transparent; outline: 0; width: 240px; font-size: 13px; }
 .admin-list { margin-top: 12px; }
-.admin-product { display: flex; gap: 14px; align-items: center; padding: 20px 0; border-bottom: 1px solid var(--line); transition: background .12s ease, opacity .12s ease; }
-.admin-product.is-dragging { opacity: .55; background: #eaf2fb; }
+.admin-product { position: relative; display: flex; gap: 14px; align-items: center; padding: 20px 0; border-bottom: 1px solid var(--line); transition: background .16s ease, opacity .16s ease, box-shadow .16s ease; }
+.admin-product.is-dragging { opacity: .2; }
+.admin-product.is-drop-target:not(.is-dragging) { background: #edf5ff; box-shadow: inset 0 0 0 2px #9fc3eb; border-radius: 14px; }
+.admin-product-overlay { width: min(1020px, calc(100vw - 48px)); padding: 18px 14px; border: 1px solid #cbdff3; border-radius: 14px; background: #fff; box-shadow: 0 18px 48px rgba(13, 35, 66, .2); pointer-events: none; }
 .reorder-hint { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
 .drag-handle { flex: 0 0 34px; width: 34px; height: 40px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--muted); font-size: 21px; line-height: 1; cursor: grab; touch-action: none; user-select: none; }
 .drag-handle:hover:not(:disabled) { color: var(--ink); border-color: #cbdff3; background: var(--blue-soft); }
