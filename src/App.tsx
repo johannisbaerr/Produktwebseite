@@ -12,6 +12,44 @@ type Product = { id: number; name: string; description: string; priceCents: numb
 const currency = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' })
 const emptyForm = { name: '', description: '', price: '', stock: '', status: 'active' as 'active' | 'unlisted' }
 const apiBaseUrl = import.meta.env.VITE_API_URL || 'https://shop-api-c4sq.onrender.com'
+const publicProductsCacheKey = `shop:public-products:${apiBaseUrl}`
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
+
+function readPublicProductsCache(): Product[] {
+  try {
+    const cached = localStorage.getItem(publicProductsCacheKey)
+    if (!cached) return []
+    const products: unknown = JSON.parse(cached)
+    if (!Array.isArray(products)) return []
+    return products.filter((product): product is Product =>
+      isRecord(product) &&
+      typeof product.id === 'number' &&
+      typeof product.name === 'string' &&
+      typeof product.description === 'string' &&
+      typeof product.priceCents === 'number' &&
+      typeof product.stock === 'number' &&
+      (product.status === 'active' || product.status === 'unlisted') &&
+      typeof product.updatedAt === 'string' &&
+      Array.isArray(product.images) &&
+      product.images.every((image: unknown) =>
+        isRecord(image) &&
+        typeof image.id === 'number' &&
+        typeof image.url === 'string' &&
+        typeof image.originalName === 'string',
+      ),
+    )
+  } catch {
+    return []
+  }
+}
+
+function cachePublicProducts(products: Product[]) {
+  try {
+    localStorage.setItem(publicProductsCacheKey, JSON.stringify(products))
+  } catch {
+    // The catalog remains usable when browser storage is unavailable or full.
+  }
+}
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${url}`, { ...options, credentials: 'include' })
@@ -20,30 +58,65 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return data
 }
 
-function Gallery({ product, admin = false, onDeleteImage }: { product: Product; admin?: boolean; onDeleteImage?: (imageId: number) => void }) {
+function Gallery({ product, admin = false, priority = false, onDeleteImage }: { product: Product; admin?: boolean; priority?: boolean; onDeleteImage?: (imageId: number) => void }) {
   const [selected, setSelected] = useState(0)
   const startX = useRef<number | null>(null)
   const image = product.images[selected]
   const move = (direction: number) => setSelected((current) => (current + direction + product.images.length) % product.images.length)
   return <div className="gallery"><div className="gallery-main" onTouchStart={(event) => { startX.current = event.touches[0].clientX }} onTouchEnd={(event) => { if (startX.current === null) return; const distance = event.changedTouches[0].clientX - startX.current; if (Math.abs(distance) > 35) move(distance > 0 ? -1 : 1); startX.current = null }}>
-    {image ? <img src={image.url} alt={product.name} /> : <div className="image-placeholder">Kein Bild</div>}
+    {image ? <img src={image.url} alt={product.name} loading={priority ? 'eager' : 'lazy'} decoding="async" fetchPriority={priority ? 'high' : 'auto'} /> : <div className="image-placeholder">Kein Bild</div>}
     {product.images.length > 1 && <><button className="gallery-arrow left" aria-label="Vorheriges Bild" onClick={() => move(-1)}>←</button><button className="gallery-arrow right" aria-label="Nächstes Bild" onClick={() => move(1)}>→</button></>}
     <span className="image-count">{product.images.length ? `${selected + 1} / ${product.images.length}` : '0 Bilder'}</span>
-  </div>{product.images.length > 1 && <div className="thumbnails">{product.images.map((item, index) => <div className={`thumbnail-wrap ${index === selected ? 'selected' : ''}`} key={item.id}><button className="thumbnail" onClick={() => setSelected(index)}><img src={item.url} alt={`${product.name} Ansicht ${index + 1}`} /></button>{admin && onDeleteImage && <button className="thumbnail-remove" onClick={() => onDeleteImage(item.id)} aria-label="Bild entfernen">×</button>}</div>)}</div>}</div>
+  </div>{product.images.length > 1 && <div className="thumbnails">{product.images.map((item, index) => <div className={`thumbnail-wrap ${index === selected ? 'selected' : ''}`} key={item.id}><button className="thumbnail" onClick={() => setSelected(index)}><img src={item.url} alt={`${product.name} Ansicht ${index + 1}`} loading="lazy" decoding="async" /></button>{admin && onDeleteImage && <button className="thumbnail-remove" onClick={() => onDeleteImage(item.id)} aria-label="Bild entfernen">×</button>}</div>)}</div>}</div>
 }
 
 function PublicView({ onAdmin }: { onAdmin: () => void }) {
-  const [products, setProducts] = useState<Product[]>([])
-  const [loading, setLoading] = useState(true)
+  const [products, setProducts] = useState<Product[]>(readPublicProductsCache)
+  const [loading, setLoading] = useState(() => readPublicProductsCache().length === 0)
+  const [loadError, setLoadError] = useState('')
+  const hasCatalogRef = useRef(false)
   useEffect(() => {
     let mounted = true
-    const loadProducts = () => request<Product[]>('/api/products').then((nextProducts) => { if (mounted) setProducts(nextProducts) }).finally(() => { if (mounted) setLoading(false) })
+    let loadingProducts = false
+    const loadProducts = () => {
+      if (loadingProducts || document.visibilityState === 'hidden') return
+      loadingProducts = true
+      request<Product[]>('/api/products')
+        .then((nextProducts) => {
+          cachePublicProducts(nextProducts)
+          if (mounted) {
+            setProducts(nextProducts)
+            hasCatalogRef.current = true
+            setLoadError('')
+          }
+        })
+        .catch(() => {
+          const cachedProducts = readPublicProductsCache()
+          if (mounted && !hasCatalogRef.current && cachedProducts.length > 0) {
+            setProducts(cachedProducts)
+            hasCatalogRef.current = true
+          } else if (mounted && !hasCatalogRef.current) {
+            setLoadError('Produkte konnten gerade nicht geladen werden. Bitte versuche es erneut.')
+          }
+        })
+        .finally(() => {
+          loadingProducts = false
+          if (mounted) setLoading(false)
+        })
+    }
     loadProducts()
-    const refresh = window.setInterval(loadProducts, 5000)
-    return () => { mounted = false; window.clearInterval(refresh) }
+    const refresh = window.setInterval(loadProducts, 30000)
+    window.addEventListener('focus', loadProducts)
+    document.addEventListener('visibilitychange', loadProducts)
+    return () => {
+      mounted = false
+      window.clearInterval(refresh)
+      window.removeEventListener('focus', loadProducts)
+      document.removeEventListener('visibilitychange', loadProducts)
+    }
   }, [])
   return <div className="public-shell"><header className="site-header"><a className="brand" href="/">shop</a><nav><button className="admin-link" onClick={onAdmin}>Admin <span>↗</span></button></nav></header><main>
-    <section className="collection" id="collection"><div className="section-heading"><div><p className="eyebrow">Die aktuelle Auswahl</p><h2>Produkte</h2></div><span className="product-total">{products.length.toString().padStart(2, '0')} Artikel</span></div>{loading ? <div className="loading">Produkte werden geladen ...</div> : products.length === 0 ? <div className="empty-public"><span>○</span><h3>Demnächst hier</h3><p>Unsere aktuelle Auswahl wird gerade vorbereitet.</p></div> : <div className="product-grid">{products.map((product, index) => <article className="product-card" key={product.id} style={{ animationDelay: `${index * 80}ms` }}><Gallery product={product} /><div className="product-info"><div><h3>{product.name}</h3><p>{product.description}</p></div><div className="product-price"><strong>{currency.format(product.priceCents / 100)}</strong><span className="stock-indicator">{product.stock} auf Lager</span></div></div></article>)}</div>}</section>
+    <section className="collection" id="collection"><div className="section-heading"><div><p className="eyebrow">Die aktuelle Auswahl</p><h2>Produkte</h2></div><span className="product-total">{products.length.toString().padStart(2, '0')} Artikel</span></div>{loading ? <div className="loading">Produkte werden geladen ...</div> : products.length === 0 ? loadError ? <div className="loading" role="alert">{loadError}</div> : <div className="empty-public"><span>○</span><h3>Demnächst hier</h3><p>Unsere aktuelle Auswahl wird gerade vorbereitet.</p></div> : <div className="product-grid">{products.map((product, index) => <article className="product-card" key={product.id} style={{ animationDelay: `${Math.min(index * 35, 105)}ms` }}><Gallery product={product} priority={index < 2} /><div className="product-info"><div><h3>{product.name}</h3><p>{product.description}</p></div><div className="product-price"><strong>{currency.format(product.priceCents / 100)}</strong><span className="stock-indicator">{product.stock} auf Lager</span></div></div></article>)}</div>}</section>
     </main><footer><span>shop <small>Eine Auswahl mit Haltung.</small></span><span>© {new Date().getFullYear()}</span></footer></div>
 }
 
