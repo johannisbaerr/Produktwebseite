@@ -116,7 +116,8 @@ footer small { font: 11px 'DM Sans'; margin-left: 15px; }
 .drag-handle:active:not(:disabled), .admin-product.is-dragging .drag-handle { cursor: grabbing; }
 .drag-handle:disabled { opacity: .4; cursor: not-allowed; }
 .admin-thumb { width: 89px; height: 89px; flex: 0 0 auto; background: #edf2f7; border-radius: 14px; overflow: hidden; }
-.admin-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.admin-thumb img { width: 100%; height: 100%; padding: 6px; object-fit: contain; }
+.admin-shell .thumbnail img { object-fit: contain; padding: 4px; }
 .admin-product-main { min-width: 0; flex: 1; }
 .admin-product-title { display: flex; gap: 13px; align-items: center; }
 .admin-product h3 { font-size: 17px; font-weight: 500; margin: 0; }
