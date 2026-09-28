@@ -84,7 +84,7 @@ app.get('/api/auth/me', auth, (_req, res) => res.json({ username: 'admin' }))
 
 app.get('/api/admin/products', auth, async (req, res) => {
   const search = String(req.query.search || '').trim()
-  let query = supabase.from('products').select(productSelect).order('updated_at', { ascending: false })
+  let query = supabase.from('products').select(productSelect).order('updated_at', { ascending: false }).order('id', { ascending: true })
   if (search) query = query.ilike('name', `%${search}%`)
   const { data, error } = await query
   if (error) return res.status(500).json({ error: 'Produkte konnten nicht geladen werden.' })
@@ -92,25 +92,21 @@ app.get('/api/admin/products', auth, async (req, res) => {
 })
 
 app.post('/api/admin/products/reorder', auth, async (req, res) => {
-  const productId = Number(req.body?.productId)
-  const neighborId = Number(req.body?.neighborId)
-  if (!Number.isInteger(productId) || !Number.isInteger(neighborId) || productId === neighborId) {
+  const orderedIds = req.body?.orderedIds
+  if (!Array.isArray(orderedIds) || orderedIds.some((id) => !Number.isInteger(id))) {
     return res.status(400).json({ error: 'Ungültige Produktreihenfolge.' })
   }
-  const { data: products, error: lookupError } = await supabase.from('products').select('id,updated_at').order('updated_at', { ascending: false })
+  const { data: products, error: lookupError } = await supabase.from('products').select('id,updated_at').order('updated_at', { ascending: false }).order('id', { ascending: true })
   if (lookupError) return res.status(500).json({ error: 'Reihenfolge konnte nicht geladen werden.' })
-  const ordered = [...(products || [])]
-  const currentIndex = ordered.findIndex((product) => product.id === productId)
-  const neighborIndex = ordered.findIndex((product) => product.id === neighborId)
-  if (currentIndex === -1 || neighborIndex === -1 || Math.abs(currentIndex - neighborIndex) !== 1) {
+  const currentIds = (products || []).map((product) => product.id)
+  const requestedIds = orderedIds as number[]
+  if (requestedIds.length !== currentIds.length || new Set(requestedIds).size !== requestedIds.length || requestedIds.some((id) => !currentIds.includes(id))) {
     return res.status(400).json({ error: 'Ungültige Produktreihenfolge.' })
   }
-  ;[ordered[currentIndex], ordered[neighborIndex]] = [ordered[neighborIndex], ordered[currentIndex]]
-  const baseTime = Date.now() + ordered.length * 1000
-  for (const [index, product] of ordered.entries()) {
-    const { error } = await supabase.from('products').update({ updated_at: new Date(baseTime - index * 1000).toISOString() }).eq('id', product.id)
-    if (error) return res.status(500).json({ error: 'Reihenfolge konnte nicht gespeichert werden.' })
-  }
+  if (requestedIds.every((id, index) => id === currentIds[index])) return res.json({ ok: true })
+  const baseTime = Date.now() + requestedIds.length * 1000
+  const updates = await Promise.all(requestedIds.map((id, index) => supabase.from('products').update({ updated_at: new Date(baseTime - index * 1000).toISOString() }).eq('id', id)))
+  if (updates.some(({ error }) => error)) return res.status(500).json({ error: 'Reihenfolge konnte nicht gespeichert werden.' })
   res.json({ ok: true })
 })
 
