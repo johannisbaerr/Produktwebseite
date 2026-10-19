@@ -195,6 +195,20 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   }, [selectedCategory])
 
   useEffect(() => {
+    if (!cartOpen) return
+    const previousOverflow = document.body.style.overflow
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCartOpen(false)
+    }
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [cartOpen])
+
+  useEffect(() => {
     if (selectedCategory && selectedCategory !== 'all-products' && categories.length > 1 && !categories.some((category) => category.id === selectedCategory)) {
       setSelectedCategory('')
     }
@@ -298,7 +312,10 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   return <div className="public-shell">
     <header className="site-header"><a className="brand" href="/">Amspind<span className="brand-mark">›</span></a>
       <form className="shop-search" onSubmit={(event) => { event.preventDefault(); setSelectedCategory('all-products') }}><input aria-label="Produkte suchen" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Wonach suchst du?" /><button aria-label="Suchen">⌕</button></form>
-      <nav><button className="cart-button" onClick={() => setCartOpen(true)}><span className="cart-label">Warenkorb</span><span className="cart-count">{cartCount}</span></button><button className="admin-link" onClick={onAdmin}>Admin-Anmeldung <span>↗</span></button></nav>
+      <nav><button className="cart-button" onClick={() => setCartOpen(true)} aria-label={`Warenkorb, ${cartCount} Artikel`}>
+        <span className="cart-icon-wrap"><svg className="cart-icon" viewBox="0 0 32 30" aria-hidden="true"><path d="M2 3h4l3.2 16.1a3 3 0 0 0 3 2.4h12.5a3 3 0 0 0 2.9-2.2L30 9H8" /><circle cx="13" cy="26" r="1.8" /><circle cx="24" cy="26" r="1.8" /></svg><span className="cart-count">{cartCount}</span></span>
+        <span className="cart-label">Warenkorb</span>
+      </button><button className="admin-link" onClick={onAdmin}>Admin-Anmeldung <span>↗</span></button></nav>
     </header>
     <main className="shop-main">
       <section className="category-navigation" aria-label="Entdecke Kategorien">
@@ -318,16 +335,25 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       </section>}
     </main>
     <footer><span>Amspind <small>Dein Spind, deine Auswahl.</small></span><span>© {new Date().getFullYear()}</span></footer>
-    {cartOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false) }}><section className="cart-panel" aria-label="Warenkorb"><div className="form-header"><div><p className="eyebrow">Deine Auswahl</p><h2>Warenkorb</h2></div><button className="icon-button" onClick={() => setCartOpen(false)} aria-label="Schließen">×</button></div>
+    {cartOpen && <div className="cart-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false) }}><section className="cart-panel" role="dialog" aria-modal="true" aria-labelledby="cart-title"><header className="cart-panel-header"><a className="brand" href="/" onClick={(event) => { event.preventDefault(); setCartOpen(false) }}>Amspind<span className="brand-mark">›</span></a><div className="cart-panel-heading"><p className="eyebrow">Deine Auswahl</p><h2 id="cart-title">Warenkorb <span>({cartCount} Artikel)</span></h2></div><button className="icon-button" onClick={() => setCartOpen(false)} aria-label="Warenkorb schließen">×</button></header>
+      <div className="cart-page-content">
+      <div className="cart-page-items">
       {cart.length === 0 ? <p className="muted">Dein Warenkorb ist noch leer.</p> : <div className="cart-items">{cart.map((item) => {
         const product = products.find((entry) => entry.id === item.productId)
-        return <div className="cart-item" key={item.productId}><div><strong>{product?.name || 'Produkt nicht mehr verfügbar'}</strong><small>{product ? currency.format(product.priceCents / 100) : 'Nicht verfügbar'}</small></div><div className="quantity-control"><button onClick={() => changeQuantity(item.productId, item.quantity - 1)} aria-label="Menge verringern">−</button><span>{item.quantity}</span><button disabled={!product || item.quantity >= product.stock} onClick={() => product && changeQuantity(item.productId, item.quantity + 1)} aria-label="Menge erhöhen">+</button></div><button className="delete-button" onClick={() => changeQuantity(item.productId, 0)}>Entfernen</button></div>
+        return <article className="cart-item cart-page-item" key={item.productId}>
+          <div className="cart-product-image">{product?.images[0] && <img src={product.images[0].url} alt="" />}</div>
+          <div className="cart-product-details"><strong>{product?.name || 'Produkt nicht mehr verfügbar'}</strong><small>{product ? currency.format(product.priceCents / 100) : 'Nicht verfügbar'}</small><span>{product ? `${product.stock} auf Lager` : 'Nicht mehr im Sortiment'}</span><div className="cart-item-actions"><div className="quantity-control"><button onClick={() => changeQuantity(item.productId, item.quantity - 1)} aria-label="Menge verringern">−</button><span>{item.quantity}</span><button disabled={!product || item.quantity >= product.stock} onClick={() => product && changeQuantity(item.productId, item.quantity + 1)} aria-label="Menge erhöhen">+</button></div><button className="delete-button" onClick={() => changeQuantity(item.productId, 0)}>Entfernen</button></div></div>
+          <strong className="cart-line-total">{product ? currency.format(product.priceCents * item.quantity / 100) : '—'}</strong>
+        </article>
       })}</div>}
-      <div className="cart-total"><strong>Zwischensumme</strong><strong>{currency.format(cartTotal / 100)}</strong></div>
+      </div>
+      <aside className="cart-summary"><div className="cart-total"><strong>Zwischensumme ({cartCount} Artikel)</strong><strong>{currency.format(cartTotal / 100)}</strong></div>
       {shareLink && <label className="share-link-field">Bestelllink<input readOnly value={shareLink} onFocus={(event) => event.currentTarget.select()} /></label>}
       {cartError && <div className="form-error" role="alert">{cartError}</div>}
       <button className="primary-button" disabled={!cart.length} onClick={() => { void createShareableOrder() }}>{shareLink ? 'Bestelllink kopieren / teilen' : 'Bestellung teilen'}</button>
       <p className="cart-note">Die Bestelldetails sind nur nach Admin-Anmeldung sichtbar.</p>
+      </aside>
+      </div>
     </section></div>}
     {clearCartPrompt && <div className="modal-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="clear-cart-title"><h2 id="clear-cart-title">Möchtest du deinen Warenkorb leeren?</h2><div><button className="primary-button" onClick={() => { setCart([]); setShareLink(''); setClearCartPrompt(false) }}>Ja</button><button className="secondary-button" onClick={() => setClearCartPrompt(false)}>Nein</button></div></section></div>}
   </div>
@@ -461,6 +487,7 @@ function CategoryManager({ products }: { products: Product[] }) {
 function ChangeNotes() {
   const [open, setOpen] = useState(false)
   const entries = [
+    { date: '2026-10-19', title: 'Warenkorb auf Vollbild umgestellt', details: 'Der Warenkorb öffnet jetzt als vollständige, bildschirmfüllende Ansicht mit Produktliste und separater Zwischensumme. Die Artikelanzahl sitzt direkt über dem Warenkorb-Symbol.' },
     { date: '2026-10-19', title: 'Bestellmengen im Admin vom Bestand abbuchen', details: 'Die Admin-Bestellansicht fragt vor dem Abziehen der bestellten Mengen nach. Die Abbuchung läuft atomar und kann pro Bestellung nur einmal erfolgen.' },
     { date: '2026-10-19', title: 'Alle Produkte als Kategorie-Karte', details: 'Die kleine Kategorie-Leiste unter der Suche entfernt. „Alle Produkte“ ist jetzt eine große Karte in der Kategorie-Reihe und zeigt ebenfalls wechselnde, per Wischgeste bedienbare Produktbilder.' },
     { date: '2026-10-19', title: 'Startseiten-Überschrift entfernt', details: 'Die zusätzliche Überschrift über den Kategorie-Karten entfernt, damit die Startseite direkt mit den Kategorien beginnt.' },
