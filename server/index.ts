@@ -44,11 +44,22 @@ const upload = multer({
 })
 
 type ImageRow = { id: number; filename: string; original_name: string; sort_order: number }
-type ProductRow = { id: number; name: string; description: string; price_cents: number; stock: number; status: 'active' | 'unlisted'; created_at: string; updated_at: string; product_images?: ImageRow[] }
+type ProductRow = { id: number; name: string; description: string; price_cents: number; stock: number; status: 'active' | 'unlisted'; search_terms?: string[]; created_at: string; updated_at: string; product_images?: ImageRow[]; product_categories?: { category_id: string }[] }
 type SessionRow = { admin_id: number; expires_at: string }
-const productSelect = 'id,name,description,price_cents,stock,status,created_at,updated_at,product_images(id,filename,original_name,sort_order)'
+const productSelect = 'id,name,description,price_cents,stock,status,search_terms,created_at,updated_at,product_images(id,filename,original_name,sort_order),product_categories(category_id)'
 const imagePayload = (image: ImageRow) => ({ id: image.id, url: supabase.storage.from(storageBucket).getPublicUrl(image.filename).data.publicUrl, originalName: image.original_name })
-const productPayload = (row: ProductRow) => ({ id: row.id, name: row.name, description: row.description || '', priceCents: row.price_cents, stock: row.stock, status: row.stock > 0 && row.status === 'active' ? 'active' : 'unlisted', createdAt: row.created_at, updatedAt: row.updated_at, images: (row.product_images || []).sort((a, b) => a.sort_order - b.sort_order || a.id - b.id).map(imagePayload) })
+const productPayload = (row: ProductRow) => ({ id: row.id, name: row.name, description: row.description || '', priceCents: row.price_cents, stock: row.stock, status: row.stock > 0 && row.status === 'active' ? 'active' : 'unlisted', searchTerms: row.search_terms || [], categoryIds: (row.product_categories || []).map(({ category_id }) => category_id), createdAt: row.created_at, updatedAt: row.updated_at, images: (row.product_images || []).sort((a, b) => a.sort_order - b.sort_order || a.id - b.id).map(imagePayload) })
+
+const categoryDesigns = ['Kachel', 'Panorama', 'Kompakt'] as const
+const categoryPayload = (row: { id: string; name: string; sort_order: number; design: string; preview_mode: 'products' | 'upload'; preview_image: string | null }, productIds: string[]) => ({
+  id: row.id,
+  name: row.name,
+  sortOrder: row.sort_order,
+  design: row.design,
+  previewMode: row.preview_mode,
+  previewImageUrl: row.preview_image ? supabase.storage.from(storageBucket).getPublicUrl(row.preview_image).data.publicUrl : null,
+  productIds,
+})
 
 const auth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const token = req.cookies.admin_session
@@ -58,10 +69,146 @@ const auth = async (req: express.Request, res: express.Response, next: express.N
   next()
 }
 
+app.get('/api/categories', async (_req, res) => {
+  const { data: categories, error } = await supabase.from('categories').select('id,name,sort_order,design,preview_mode,preview_image').order('sort_order', { ascending: true })
+  if (error) return res.status(500).json({ error: 'Kategorien konnten nicht geladen werden.' })
+  const { data: memberships, error: membershipError } = await supabase.from('product_categories').select('category_id,product_id')
+  if (membershipError) return res.status(500).json({ error: 'Kategoriezuordnungen konnten nicht geladen werden.' })
+  res.json((categories || []).map((category) => categoryPayload(
+    category,
+    (memberships || []).filter((membership) => membership.category_id === category.id).map((membership) => membership.product_id),
+  )))
+})
+
 app.get('/api/products', async (_req, res) => {
   const { data, error } = await supabase.from('products').select(productSelect).eq('status', 'active').gt('stock', 0).order('updated_at', { ascending: false })
   if (error) return res.status(500).json({ error: 'Produkte konnten nicht geladen werden.' })
   res.json((data as ProductRow[]).map(productPayload))
+})
+
+app.post('/api/orders', async (req, res) => {
+  const items = req.body?.items
+  if (!Array.isArray(items) || items.length === 0 || items.length > 100) return res.status(400).json({ error: 'Der Warenkorb ist leer oder ungültig.' })
+  const requested = new Map<number, number>()
+  for (const item of items) {
+    if (!Number.isInteger(item?.productId) || !Number.isInteger(item?.quantity) || item.quantity < 1 || item.quantity > 99) {
+      return res.status(400).json({ error: 'Ungültige Artikel im Warenkorb.' })
+    }
+    requested.set(item.productId, (requested.get(item.productId) || 0) + item.quantity)
+  }
+  const { data: products, error } = await supabase.from('products').select('id,name,price_cents,stock,status').in('id', [...requested.keys()])
+  if (error) return res.status(500).json({ error: 'Bestellung konnte nicht erstellt werden.' })
+  if (!products || products.length !== requested.size || products.some((product) => product.status !== 'active' || product.stock < (requested.get(product.id) || 0))) {
+    return res.status(409).json({ error: 'Ein Artikel ist inzwischen nicht mehr verfügbar oder der Bestand hat sich geändert.' })
+  }
+  const orderItems = products.map((product) => ({ productId: product.id, name: product.name, priceCents: product.price_cents, quantity: requested.get(product.id) || 0 }))
+  const token = crypto.randomBytes(24).toString('hex')
+  const { error: insertError } = await supabase.from('orders').insert({ token, items: orderItems })
+  if (insertError) return res.status(500).json({ error: 'Bestellung konnte nicht gespeichert werden.' })
+  res.status(201).json({ token })
+})
+
+app.get('/api/admin/orders/:token', auth, async (req, res) => {
+  const token = String(req.params.token)
+  if (!/^[a-f0-9]{48}$/.test(token)) return res.status(404).json({ error: 'Bestellung nicht gefunden.' })
+  const { data, error } = await supabase.from('orders').select('created_at,items').eq('token', token).maybeSingle()
+  if (error) return res.status(500).json({ error: 'Bestellung konnte nicht geladen werden.' })
+  if (!data) return res.status(404).json({ error: 'Bestellung nicht gefunden.' })
+  res.json({ createdAt: data.created_at, items: data.items })
+})
+
+app.get('/api/admin/categories', auth, async (_req, res) => {
+  const { data: categories, error } = await supabase.from('categories').select('id,name,sort_order,design,preview_mode,preview_image').order('sort_order', { ascending: true })
+  if (error) return res.status(500).json({ error: 'Kategorien konnten nicht geladen werden.' })
+  const { data: memberships, error: membershipError } = await supabase.from('product_categories').select('category_id,product_id')
+  if (membershipError) return res.status(500).json({ error: 'Kategoriezuordnungen konnten nicht geladen werden.' })
+  res.json((categories || []).map((category) => categoryPayload(
+    category,
+    (memberships || []).filter((membership) => membership.category_id === category.id).map((membership) => membership.product_id),
+  )))
+})
+
+app.post('/api/admin/categories', auth, async (req, res) => {
+  const name = String(req.body?.name || '').trim()
+  const design = String(req.body?.design || categoryDesigns[0])
+  if (!name || name.length > 80) return res.status(400).json({ error: 'Bitte einen Kategorienamen mit höchstens 80 Zeichen eingeben.' })
+  if (name.toLocaleLowerCase('de-DE') === 'alle produkte') return res.status(400).json({ error: '„Alle Produkte“ ist bereits als feste Kategorie vorhanden.' })
+  if (!categoryDesigns.includes(design as typeof categoryDesigns[number])) return res.status(400).json({ error: 'Ungültiges Kategorie-Design.' })
+  const { data: last } = await supabase.from('categories').select('sort_order').order('sort_order', { ascending: false }).limit(1).maybeSingle()
+  const { data, error } = await supabase.from('categories').insert({ name, design, sort_order: (last?.sort_order ?? 0) + 1 }).select('id,name,sort_order,design,preview_mode,preview_image').single()
+  if (error) return res.status(500).json({ error: 'Kategorie konnte nicht erstellt werden.' })
+  res.status(201).json(categoryPayload(data, []))
+})
+
+app.patch('/api/admin/categories/:id', auth, upload.single('previewImage'), async (req, res) => {
+  const id = String(req.params.id)
+  const { data: current, error: lookupError } = await supabase.from('categories').select('id,name,sort_order,design,preview_mode,preview_image').eq('id', id).maybeSingle()
+  if (lookupError) return res.status(500).json({ error: 'Kategorie konnte nicht geladen werden.' })
+  if (!current) return res.status(404).json({ error: 'Kategorie nicht gefunden.' })
+  if (id === 'all-products') return res.status(400).json({ error: '„Alle Produkte“ kann nicht bearbeitet werden.' })
+  const name = String(req.body?.name ?? current.name).trim()
+  const design = String(req.body?.design ?? current.design)
+  const previewMode = String(req.body?.previewMode ?? current.preview_mode)
+  let submittedProductIds: unknown
+  try {
+    submittedProductIds = JSON.parse(String(req.body?.productIds || '[]'))
+  } catch {
+    return res.status(400).json({ error: 'Ungültige Produktauswahl.' })
+  }
+  if (!name || name.length > 80) return res.status(400).json({ error: 'Bitte einen Kategorienamen mit höchstens 80 Zeichen eingeben.' })
+  if (name.toLocaleLowerCase('de-DE') === 'alle produkte') return res.status(400).json({ error: '„Alle Produkte“ ist bereits als feste Kategorie vorhanden.' })
+  if (!categoryDesigns.includes(design as typeof categoryDesigns[number])) return res.status(400).json({ error: 'Ungültiges Kategorie-Design.' })
+  if (previewMode !== 'products' && previewMode !== 'upload') return res.status(400).json({ error: 'Ungültige Kategorie-Vorschau.' })
+  if (!Array.isArray(submittedProductIds) || submittedProductIds.some((productId) => !Number.isInteger(productId))) return res.status(400).json({ error: 'Ungültige Produktauswahl.' })
+  const productIds = [...new Set(submittedProductIds)]
+  if (productIds.length) {
+    const { data: existingProducts, error: productLookupError } = await supabase.from('products').select('id').in('id', productIds)
+    if (productLookupError) return res.status(500).json({ error: 'Produktauswahl konnte nicht geprüft werden.' })
+    if (!existingProducts || existingProducts.length !== productIds.length) return res.status(400).json({ error: 'Die Produktauswahl enthält unbekannte Produkte.' })
+  }
+  let previewImage = current.preview_image as string | null
+  const file = previewMode === 'upload' ? req.file : undefined
+  if (file) {
+    previewImage = `${id}/${crypto.randomUUID()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    const { error } = await supabase.storage.from(storageBucket).upload(previewImage, file.buffer, { contentType: file.mimetype, upsert: false })
+    if (error) return res.status(500).json({ error: 'Kategorie-Bild konnte nicht gespeichert werden.' })
+  }
+  const { error: updateError } = await supabase.from('categories').update({ name, design, preview_mode: previewMode, preview_image: previewMode === 'upload' ? previewImage : null }).eq('id', id)
+  if (updateError) return res.status(500).json({ error: 'Kategorie konnte nicht gespeichert werden.' })
+  const { error: deleteError } = await supabase.from('product_categories').delete().eq('category_id', id)
+  if (deleteError) return res.status(500).json({ error: 'Produktzuordnungen konnten nicht aktualisiert werden.' })
+  if (productIds.length) {
+    const { error: insertError } = await supabase.from('product_categories').insert(productIds.map((product_id) => ({ category_id: id, product_id })))
+    if (insertError) return res.status(500).json({ error: 'Produktzuordnungen konnten nicht gespeichert werden.' })
+  }
+  if (current.preview_image && (file || previewMode !== 'upload')) await supabase.storage.from(storageBucket).remove([current.preview_image])
+  res.json({ ok: true })
+})
+
+app.post('/api/admin/categories/reorder', auth, async (req, res) => {
+  const orderedIds = req.body?.orderedIds
+  if (!Array.isArray(orderedIds) || orderedIds.some((id) => typeof id !== 'string') || new Set(orderedIds).size !== orderedIds.length) {
+    return res.status(400).json({ error: 'Ungültige Kategorienreihenfolge.' })
+  }
+  const { data: categories, error } = await supabase.from('categories').select('id').neq('id', 'all-products')
+  if (error) return res.status(500).json({ error: 'Kategorien konnten nicht geladen werden.' })
+  const currentIds = (categories || []).map((category) => category.id)
+  if (orderedIds.length !== currentIds.length || orderedIds.some((id) => !currentIds.includes(id))) return res.status(400).json({ error: 'Ungültige Kategorienreihenfolge.' })
+  const updates = await Promise.all(orderedIds.map((id, index) => supabase.from('categories').update({ sort_order: index + 1 }).eq('id', id)))
+  if (updates.some(({ error: updateError }) => updateError)) return res.status(500).json({ error: 'Kategorienreihenfolge konnte nicht gespeichert werden.' })
+  res.json({ ok: true })
+})
+
+app.delete('/api/admin/categories/:id', auth, async (req, res) => {
+  const id = String(req.params.id)
+  if (id === 'all-products') return res.status(400).json({ error: '„Alle Produkte“ kann nicht gelöscht werden.' })
+  const { data: category, error: lookupError } = await supabase.from('categories').select('preview_image').eq('id', id).maybeSingle()
+  if (lookupError) return res.status(500).json({ error: 'Kategorie konnte nicht geladen werden.' })
+  if (!category) return res.status(404).json({ error: 'Kategorie nicht gefunden.' })
+  const { error } = await supabase.from('categories').delete().eq('id', id)
+  if (error) return res.status(500).json({ error: 'Kategorie konnte nicht gelöscht werden.' })
+  if (category.preview_image) await supabase.storage.from(storageBucket).remove([category.preview_image])
+  res.json({ ok: true })
 })
 
 app.post('/api/auth/login', async (req, res) => {
@@ -113,14 +260,18 @@ app.post('/api/admin/products/reorder', auth, async (req, res) => {
 const validateProduct = (body: Record<string, unknown>) => {
   const name = String(body.name || '').trim()
   const description = String(body.description || '').trim()
+  const searchTerms = Array.isArray(body.searchTerms)
+    ? body.searchTerms.map((term) => String(term).trim()).filter(Boolean)
+    : String(body.searchTerms || '').split(',').map((term) => term.trim()).filter(Boolean)
   const priceCents = Number(body.priceCents)
   const stock = Number(body.stock)
   if (!name || name.length > 160) return 'Bitte einen gültigen Produktnamen eingeben.'
   if (description.length > 5000) return 'Die Beschreibung darf höchstens 5000 Zeichen enthalten.'
+  if (searchTerms.some((term) => term.length > 80) || searchTerms.length > 30) return 'Es sind höchstens 30 Suchbegriffe mit jeweils maximal 80 Zeichen erlaubt.'
   if (!Number.isInteger(priceCents) || priceCents < 0) return 'Der Preis muss ein gültiger Betrag sein.'
   if (!Number.isInteger(stock) || stock < 0) return 'Der Lagerbestand muss eine ganze Zahl ab 0 sein.'
   const status = stock > 0 && body.status === 'active' ? 'active' : 'unlisted'
-  return { name, description, priceCents, stock, status }
+  return { name, description, searchTerms: [...new Set(searchTerms)], priceCents, stock, status }
 }
 
 const uploadImages = async (productId: number, files: Express.Multer.File[], startOrder = 0) => {
@@ -139,7 +290,7 @@ app.post('/api/admin/products', auth, upload.array('images', 8), async (req, res
   if (typeof data === 'string') return res.status(400).json({ error: data })
   const files = (req.files as Express.Multer.File[]) || []
   if (!files.length) return res.status(400).json({ error: 'Mindestens ein Produktbild ist erforderlich.' })
-  const { data: product, error } = await supabase.from('products').insert({ name: data.name, description: data.description, price_cents: data.priceCents, stock: data.stock, status: data.status }).select('id').single<{ id: number }>()
+  const { data: product, error } = await supabase.from('products').insert({ name: data.name, description: data.description, search_terms: data.searchTerms, price_cents: data.priceCents, stock: data.stock, status: data.status }).select('id').single<{ id: number }>()
   if (error || !product) return res.status(500).json({ error: 'Produkt konnte nicht gespeichert werden.' })
   try { await uploadImages(product.id, files) } catch { await supabase.from('products').delete().eq('id', product.id); return res.status(500).json({ error: 'Produktbilder konnten nicht gespeichert werden.' }) }
   res.status(201).json({ ok: true })
@@ -151,7 +302,7 @@ app.patch('/api/admin/products/:id', auth, upload.array('images', 8), async (req
   if (typeof data === 'string') return res.status(400).json({ error: data })
   const { data: current } = await supabase.from('products').select('id').eq('id', id).maybeSingle()
   if (!current) return res.status(404).json({ error: 'Produkt nicht gefunden.' })
-  const { error } = await supabase.from('products').update({ name: data.name, description: data.description, price_cents: data.priceCents, stock: data.stock, status: data.status }).eq('id', id)
+  const { error } = await supabase.from('products').update({ name: data.name, description: data.description, search_terms: data.searchTerms, price_cents: data.priceCents, stock: data.stock, status: data.status }).eq('id', id)
   if (error) return res.status(500).json({ error: 'Produkt konnte nicht gespeichert werden.' })
   const files = (req.files as Express.Multer.File[]) || []
   if (files.length) { const { data: last } = await supabase.from('product_images').select('sort_order').eq('product_id', id).order('sort_order', { ascending: false }).limit(1).maybeSingle<{ sort_order: number }>(); try { await uploadImages(id, files, (last?.sort_order ?? -1) + 1) } catch { return res.status(500).json({ error: 'Neue Produktbilder konnten nicht gespeichert werden.' }) } }
