@@ -64,7 +64,11 @@ const categoryPayload = (row: { id: string; name: string; sort_order: number; de
 const auth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const token = req.cookies.admin_session
   if (!token) return res.status(401).json({ error: 'Nicht angemeldet' })
-  const { data: session } = await supabase.from('sessions').select('admin_id,expires_at').eq('token', token).gt('expires_at', new Date().toISOString()).maybeSingle<SessionRow>()
+  const { data: session, error } = await supabase.from('sessions').select('admin_id,expires_at').eq('token', token).gt('expires_at', new Date().toISOString()).maybeSingle<SessionRow>()
+  if (error) {
+    console.error('Admin session lookup failed:', error.message)
+    return res.status(500).json({ error: 'Anmeldung ist momentan nicht verfügbar.' })
+  }
   if (!session) return res.status(401).json({ error: 'Nicht angemeldet' })
   next()
 }
@@ -91,10 +95,12 @@ app.post('/api/orders', async (req, res) => {
   if (!Array.isArray(items) || items.length === 0 || items.length > 100) return res.status(400).json({ error: 'Der Warenkorb ist leer oder ungültig.' })
   const requested = new Map<number, number>()
   for (const item of items) {
-    if (!Number.isInteger(item?.productId) || !Number.isInteger(item?.quantity) || item.quantity < 1 || item.quantity > 99) {
+    if (!Number.isSafeInteger(item?.productId) || item.productId < 1 || !Number.isInteger(item?.quantity) || item.quantity < 1 || item.quantity > 99) {
       return res.status(400).json({ error: 'Ungültige Artikel im Warenkorb.' })
     }
-    requested.set(item.productId, (requested.get(item.productId) || 0) + item.quantity)
+    const quantity = (requested.get(item.productId) || 0) + item.quantity
+    if (quantity > 99) return res.status(400).json({ error: 'Pro Produkt sind höchstens 99 Stück pro Bestellung erlaubt.' })
+    requested.set(item.productId, quantity)
   }
   const { data: products, error } = await supabase.from('products').select('id,name,price_cents,stock,status').in('id', [...requested.keys()])
   if (error) return res.status(500).json({ error: 'Bestellung konnte nicht erstellt werden.' })
@@ -111,10 +117,26 @@ app.post('/api/orders', async (req, res) => {
 app.get('/api/admin/orders/:token', auth, async (req, res) => {
   const token = String(req.params.token)
   if (!/^[a-f0-9]{48}$/.test(token)) return res.status(404).json({ error: 'Bestellung nicht gefunden.' })
-  const { data, error } = await supabase.from('orders').select('created_at,items').eq('token', token).maybeSingle()
+  const { data, error } = await supabase.from('orders').select('created_at,items,fulfilled_at').eq('token', token).maybeSingle()
   if (error) return res.status(500).json({ error: 'Bestellung konnte nicht geladen werden.' })
   if (!data) return res.status(404).json({ error: 'Bestellung nicht gefunden.' })
-  res.json({ createdAt: data.created_at, items: data.items })
+  res.json({ createdAt: data.created_at, items: data.items, fulfilledAt: data.fulfilled_at })
+})
+
+app.post('/api/admin/orders/:token/fulfill', auth, async (req, res) => {
+  const token = String(req.params.token)
+  if (!/^[a-f0-9]{48}$/.test(token)) return res.status(404).json({ error: 'Bestellung nicht gefunden.' })
+  const { data, error } = await supabase.rpc('fulfill_order', { order_token: token })
+  if (error) {
+    console.error('Order fulfillment failed:', error.message)
+    return res.status(500).json({ error: 'Bestand konnte nicht abgebucht werden. Prüfe, ob die neueste Supabase-Migration ausgeführt wurde.' })
+  }
+  if (data === 'not_found') return res.status(404).json({ error: 'Bestellung nicht gefunden.' })
+  if (data === 'product_missing') return res.status(409).json({ error: 'Ein Produkt aus dieser Bestellung wurde inzwischen gelöscht. Es wurde nichts abgebucht.' })
+  if (data === 'insufficient_stock') return res.status(409).json({ error: 'Der aktuelle Lagerbestand reicht für diese Bestellung nicht aus. Es wurde nichts abgebucht.' })
+  if (data === 'invalid_order') return res.status(409).json({ error: 'Die gespeicherten Bestelldaten sind ungültig. Es wurde nichts abgebucht.' })
+  if (data !== 'fulfilled' && data !== 'already_fulfilled') return res.status(500).json({ error: 'Der Lagerbestand konnte nicht sicher aktualisiert werden.' })
+  res.json({ fulfilled: true, alreadyFulfilled: data === 'already_fulfilled' })
 })
 
 app.get('/api/admin/categories', auth, async (_req, res) => {
@@ -134,7 +156,8 @@ app.post('/api/admin/categories', auth, async (req, res) => {
   if (!name || name.length > 80) return res.status(400).json({ error: 'Bitte einen Kategorienamen mit höchstens 80 Zeichen eingeben.' })
   if (name.toLocaleLowerCase('de-DE') === 'alle produkte') return res.status(400).json({ error: '„Alle Produkte“ ist bereits als feste Kategorie vorhanden.' })
   if (!categoryDesigns.includes(design as typeof categoryDesigns[number])) return res.status(400).json({ error: 'Ungültiges Kategorie-Design.' })
-  const { data: last } = await supabase.from('categories').select('sort_order').order('sort_order', { ascending: false }).limit(1).maybeSingle()
+  const { data: last, error: lookupError } = await supabase.from('categories').select('sort_order').order('sort_order', { ascending: false }).limit(1).maybeSingle()
+  if (lookupError) return res.status(500).json({ error: 'Kategorie-Reihenfolge konnte nicht geladen werden.' })
   const { data, error } = await supabase.from('categories').insert({ name, design, sort_order: (last?.sort_order ?? 0) + 1 }).select('id,name,sort_order,design,preview_mode,preview_image').single()
   if (error) return res.status(500).json({ error: 'Kategorie konnte nicht erstellt werden.' })
   res.status(201).json(categoryPayload(data, []))
@@ -276,13 +299,24 @@ const validateProduct = (body: Record<string, unknown>) => {
 
 const uploadImages = async (productId: number, files: Express.Multer.File[], startOrder = 0) => {
   const rows: { product_id: number; filename: string; original_name: string; sort_order: number }[] = []
-  for (const [index, file] of files.entries()) {
-    const filename = `${productId}/${crypto.randomUUID()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-    const { error: uploadError } = await supabase.storage.from(storageBucket).upload(filename, file.buffer, { contentType: file.mimetype, upsert: false })
-    if (uploadError) throw uploadError
-    rows.push({ product_id: productId, filename, original_name: file.originalname, sort_order: startOrder + index })
+  try {
+    for (const [index, file] of files.entries()) {
+      const filename = `${productId}/${crypto.randomUUID()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+      const { error: uploadError } = await supabase.storage.from(storageBucket).upload(filename, file.buffer, { contentType: file.mimetype, upsert: false })
+      if (uploadError) throw uploadError
+      rows.push({ product_id: productId, filename, original_name: file.originalname, sort_order: startOrder + index })
+    }
+    if (rows.length) {
+      const { error } = await supabase.from('product_images').insert(rows)
+      if (error) throw error
+    }
+  } catch (error) {
+    if (rows.length) {
+      const { error: cleanupError } = await supabase.storage.from(storageBucket).remove(rows.map(({ filename }) => filename))
+      if (cleanupError) console.error('Product image upload cleanup failed:', cleanupError.message)
+    }
+    throw error
   }
-  if (rows.length) { const { error } = await supabase.from('product_images').insert(rows); if (error) throw error }
 }
 
 app.post('/api/admin/products', auth, upload.array('images', 8), async (req, res) => {
@@ -300,7 +334,8 @@ app.patch('/api/admin/products/:id', auth, upload.array('images', 8), async (req
   const id = Number(req.params.id)
   const data = validateProduct(req.body)
   if (typeof data === 'string') return res.status(400).json({ error: data })
-  const { data: current } = await supabase.from('products').select('id').eq('id', id).maybeSingle()
+  const { data: current, error: lookupError } = await supabase.from('products').select('id').eq('id', id).maybeSingle()
+  if (lookupError) return res.status(500).json({ error: 'Produkt konnte nicht geladen werden.' })
   if (!current) return res.status(404).json({ error: 'Produkt nicht gefunden.' })
   const { error } = await supabase.from('products').update({ name: data.name, description: data.description, search_terms: data.searchTerms, price_cents: data.priceCents, stock: data.stock, status: data.status }).eq('id', id)
   if (error) return res.status(500).json({ error: 'Produkt konnte nicht gespeichert werden.' })
@@ -312,17 +347,29 @@ app.patch('/api/admin/products/:id', auth, upload.array('images', 8), async (req
 app.delete('/api/admin/products/:id/images/:imageId', auth, async (req, res) => {
   const id = Number(req.params.id)
   const imageId = Number(req.params.imageId)
-  const { data: image } = await supabase.from('product_images').select('filename').eq('id', imageId).eq('product_id', id).maybeSingle<{ filename: string }>()
+  if (!Number.isSafeInteger(id) || id < 1 || !Number.isSafeInteger(imageId) || imageId < 1) return res.status(400).json({ error: 'Ungültige Produkt- oder Bild-ID.' })
+  const { data: image, error: lookupError } = await supabase.from('product_images').select('filename').eq('id', imageId).eq('product_id', id).maybeSingle<{ filename: string }>()
+  if (lookupError) return res.status(500).json({ error: 'Produktbild konnte nicht geladen werden.' })
   if (!image) return res.status(404).json({ error: 'Bild nicht gefunden.' })
-  await supabase.storage.from(storageBucket).remove([image.filename])
-  await supabase.from('product_images').delete().eq('id', imageId)
+  const { error: storageError } = await supabase.storage.from(storageBucket).remove([image.filename])
+  if (storageError) return res.status(500).json({ error: 'Produktbild konnte nicht aus dem Speicher gelöscht werden.' })
+  const { error: deleteError } = await supabase.from('product_images').delete().eq('id', imageId)
+  if (deleteError) return res.status(500).json({ error: 'Produktbild konnte nicht aus der Datenbank gelöscht werden.' })
   res.json({ ok: true })
 })
 
 app.delete('/api/admin/products/:id', auth, async (req, res) => {
   const id = Number(req.params.id)
-  const { data: images } = await supabase.from('product_images').select('filename').eq('product_id', id)
-  if (images?.length) await supabase.storage.from(storageBucket).remove(images.map((image) => image.filename))
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: 'Ungültige Produkt-ID.' })
+  const { data: product, error: productLookupError } = await supabase.from('products').select('id').eq('id', id).maybeSingle()
+  if (productLookupError) return res.status(500).json({ error: 'Produkt konnte nicht geladen werden.' })
+  if (!product) return res.status(404).json({ error: 'Produkt nicht gefunden.' })
+  const { data: images, error: imageLookupError } = await supabase.from('product_images').select('filename').eq('product_id', id)
+  if (imageLookupError) return res.status(500).json({ error: 'Produktbilder konnten nicht geladen werden.' })
+  if (images?.length) {
+    const { error: storageError } = await supabase.storage.from(storageBucket).remove(images.map((image) => image.filename))
+    if (storageError) return res.status(500).json({ error: 'Produktbilder konnten nicht aus dem Speicher gelöscht werden.' })
+  }
   const { error } = await supabase.from('products').delete().eq('id', id)
   if (error) return res.status(500).json({ error: 'Produkt konnte nicht gelöscht werden.' })
   res.json({ ok: true })

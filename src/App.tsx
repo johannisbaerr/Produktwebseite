@@ -10,7 +10,7 @@ type Image = { id: number; url: string; originalName: string }
 type Product = { id: number; name: string; description: string; priceCents: number; stock: number; status: 'active' | 'unlisted'; searchTerms?: string[]; categoryIds?: string[]; images: Image[]; updatedAt: string }
 type Category = { id: string; name: string; sortOrder: number; design: string; previewMode: 'products' | 'upload'; previewImageUrl: string | null; productIds: number[] }
 type CartItem = { productId: number; quantity: number }
-type Order = { createdAt: string; items: { productId: number; name: string; priceCents: number; quantity: number }[] }
+type Order = { createdAt: string; fulfilledAt: string | null; items: { productId: number; name: string; priceCents: number; quantity: number }[] }
 
 const currency = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' })
 const emptyForm = { name: '', description: '', price: '', stock: '', status: 'active' as 'active' | 'unlisted', searchTerms: '' }
@@ -61,7 +61,14 @@ function readCart(): CartItem[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(cartStorageKey) || '[]')
     return Array.isArray(value) ? value.filter((item): item is CartItem =>
-      isRecord(item) && Number.isInteger(item.productId) && Number.isInteger(item.quantity) && Number(item.quantity) > 0,
+      isRecord(item) &&
+      typeof item.productId === 'number' &&
+      Number.isSafeInteger(item.productId) &&
+      item.productId > 0 &&
+      typeof item.quantity === 'number' &&
+      Number.isInteger(item.quantity) &&
+      item.quantity > 0 &&
+      item.quantity <= 99,
     ) : []
   } catch {
     return []
@@ -131,21 +138,38 @@ function Gallery({ product, admin = false, priority = false, onDeleteImage }: { 
 function CategoryPreview({ category, products }: { category: Category; products: Product[] }) {
   const images = [...new Set(products.flatMap((product) => product.images.map((image) => image.url)))]
   const [active, setActive] = useState(0)
+  const touchStart = useRef<number | null>(null)
+  const moveImage = (direction: number) => {
+    if (images.length > 1) setActive((current) => (current + direction + images.length) % images.length)
+  }
   useEffect(() => {
     setActive(0)
     if (category.previewMode !== 'products' || images.length < 2) return
-    const timer = window.setInterval(() => setActive((current) => (current + 1) % images.length), 3500)
+    const timer = window.setInterval(() => moveImage(1), 3500)
     return () => window.clearInterval(timer)
   }, [category.id, category.previewMode, images.length])
   if (category.previewMode === 'upload') return <div className={`category-preview single-image ${category.design.toLowerCase()}`}>{category.previewImageUrl ? <img className="preview-active" src={category.previewImageUrl} alt="" /> : <span className="category-preview-empty">Bild auswählen</span>}</div>
   if (!images.length) return <div className={`category-preview category-preview-empty ${category.design.toLowerCase()}`}>Amspind</div>
-  return <div className={`category-preview single-image ${category.design.toLowerCase()}`}><img key={images[active % images.length]} className="preview-active" src={images[active % images.length]} alt="" /></div>
+  return <div className={`category-preview single-image ${category.design.toLowerCase()}`}
+    onTouchStart={(event) => { touchStart.current = event.touches[0].clientX }}
+    onTouchEnd={(event) => {
+      if (touchStart.current === null) return
+      const distance = event.changedTouches[0].clientX - touchStart.current
+      if (Math.abs(distance) > 35) {
+        event.preventDefault()
+        moveImage(distance > 0 ? -1 : 1)
+      }
+      touchStart.current = null
+    }}>
+    <img key={images[active % images.length]} className="preview-active" src={images[active % images.length]} alt="" />
+    {images.length > 1 && <span className="category-image-count">{active + 1} / {images.length}</span>}
+  </div>
 }
 
 function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const [products, setProducts] = useState<Product[]>(readPublicProductsCache)
   const [categories, setCategories] = useState<Category[]>([allProductsCategory])
-  const [loading, setLoading] = useState(() => readPublicProductsCache().length === 0)
+  const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [search, setSearch] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('')
@@ -157,7 +181,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const hasCatalogRef = useRef(false)
   const categoryCardsRef = useRef<HTMLDivElement>(null)
   const sortedCategories = useMemo(() => [allProductsCategory, ...categories.filter((category) => category.id !== 'all-products').sort((a, b) => a.sortOrder - b.sortOrder)], [categories])
-  const displayCategories = sortedCategories.filter((category) => category.id !== 'all-products')
+  const displayCategories = sortedCategories
   const categoriesForProduct = (product: Product) => sortedCategories.filter((category) => category.id !== 'all-products' && category.productIds.includes(product.id)).map((category) => category.name)
   const visibleProducts = useMemo(() => products.filter((product) => {
     const inCategory = !selectedCategory || selectedCategory === 'all-products' || sortedCategories.find((category) => category.id === selectedCategory)?.productIds.includes(product.id)
@@ -169,6 +193,12 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   useEffect(() => {
     if (selectedCategory) document.getElementById('collection')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [selectedCategory])
+
+  useEffect(() => {
+    if (selectedCategory && selectedCategory !== 'all-products' && categories.length > 1 && !categories.some((category) => category.id === selectedCategory)) {
+      setSelectedCategory('')
+    }
+  }, [categories, selectedCategory])
 
   useEffect(() => {
     let mounted = true
@@ -187,7 +217,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
           }
         })
         .catch(() => {
-          if (mounted && !hasCatalogRef.current && products.length === 0) setLoadError('Produkte konnten gerade nicht geladen werden. Bitte versuche es erneut.')
+          if (mounted && !hasCatalogRef.current) setLoadError('Produkte oder Kategorien konnten gerade nicht geladen werden. Bitte versuche es erneut.')
         })
         .finally(() => {
           loadingProducts = false
@@ -250,8 +280,14 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
         link = url.toString()
       }
       setShareLink(link)
-      if (navigator.share) await navigator.share({ title: 'Amspind Bestellung', url: link })
-      else await navigator.clipboard.writeText(link)
+      if (navigator.share) {
+        await navigator.share({ title: 'Amspind Bestellung', url: link })
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(link)
+      } else {
+        setCartError('Der Bestelllink wurde erstellt. Bitte markiere und kopiere ihn aus dem Feld unten.')
+        return
+      }
       setClearCartPrompt(true)
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') return
@@ -265,18 +301,16 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       <nav><button className="cart-button" onClick={() => setCartOpen(true)}><span className="cart-label">Warenkorb</span><span className="cart-count">{cartCount}</span></button><button className="admin-link" onClick={onAdmin}>Admin-Anmeldung <span>↗</span></button></nav>
     </header>
     <main className="shop-main">
-      <div className="shop-nav-bar"><nav className="shop-nav-categories" aria-label="Produktkategorien">{sortedCategories.map((category) => <button key={category.id} className={selectedCategory === category.id ? 'selected' : ''} onClick={() => setSelectedCategory(category.id)}>{category.name}</button>)}</nav></div>
       <section className="category-navigation" aria-label="Entdecke Kategorien">
-        <div className="promo-heading"><div><p className="eyebrow">Entdecke Amspind</p><h1>Finde deinen Favoriten</h1></div>{displayCategories.length > 3 && <div className="promo-arrows"><button aria-label="Kategorien nach links" onClick={() => categoryCardsRef.current?.scrollBy({ left: -380, behavior: 'smooth' })}>‹</button><button aria-label="Kategorien nach rechts" onClick={() => categoryCardsRef.current?.scrollBy({ left: 380, behavior: 'smooth' })}>›</button></div>}</div>
-        {displayCategories.length ? <div className="category-promo-track" ref={categoryCardsRef}>{displayCategories.map((category) => {
-          const categoryProducts = products.filter((product) => category.productIds.includes(product.id))
+        {loading ? <div className="loading">Kategorien werden geladen ...</div> : loadError && !hasCatalogRef.current ? <div className="loading" role="alert">{loadError}</div> : displayCategories.length ? <><div className="category-track-controls">{displayCategories.length > 3 && <div className="promo-arrows"><button aria-label="Kategorien nach links" onClick={() => categoryCardsRef.current?.scrollBy({ left: -380, behavior: 'smooth' })}>‹</button><button aria-label="Kategorien nach rechts" onClick={() => categoryCardsRef.current?.scrollBy({ left: 380, behavior: 'smooth' })}>›</button></div>}</div><div className="category-promo-track" ref={categoryCardsRef}>{displayCategories.map((category) => {
+          const categoryProducts = category.id === 'all-products' ? products : products.filter((product) => category.productIds.includes(product.id))
           return <button key={category.id} className="category-promo-card" onClick={() => setSelectedCategory(category.id)}>
             <CategoryPreview category={category} products={categoryProducts} />
             <div className="category-promo-copy"><span className="category-promo-kicker">Amspind Auswahl</span><h2>{category.name}</h2><p>{categoryProducts.length} {categoryProducts.length === 1 ? 'Produkt' : 'Produkte'} für deine Pause</p><span className="category-promo-link">Jetzt entdecken <span aria-hidden="true">→</span></span></div>
           </button>
-        })}</div> : <div className="category-empty"><strong>Deine Auswahl wird vorbereitet</strong><span>Bald findest du hier die Kategorien aus dem Spind.</span></div>}
+        })}</div></> : <div className="category-empty"><strong>Deine Auswahl wird vorbereitet</strong><span>Bald findest du hier die Kategorien aus dem Spind.</span></div>}
       </section>
-      {(selectedCategory || search) && <section className="collection" id="collection"><div className="section-heading"><div><p className="eyebrow">{search ? 'Suchergebnisse' : 'Die aktuelle Auswahl'}</p><h2>{sortedCategories.find((category) => category.id === selectedCategory)?.name || 'Alle Produkte'}</h2></div><button className="back-to-categories" onClick={() => { setSelectedCategory(''); setSearch(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>← Kategorien</button><span className="product-total">{visibleProducts.length.toString().padStart(2, '0')} Artikel</span></div>
+      {(selectedCategory || search) && <section className="collection" id="collection"><div className="section-heading"><div><p className="eyebrow">{search ? 'Suchergebnisse' : 'Die aktuelle Auswahl'}</p><h2>{sortedCategories.find((category) => category.id === selectedCategory)?.name || 'Alle Produkte'}</h2></div><button className="back-to-categories" onClick={() => { setSelectedCategory(''); setSearch(''); setCartError(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>← Kategorien</button><span className="product-total">{visibleProducts.length.toString().padStart(2, '0')} Artikel</span></div>
         {loading ? <div className="loading">Produkte werden geladen ...</div> : loadError ? <div className="loading" role="alert">{loadError}</div> : visibleProducts.length === 0 ? <div className="empty-public"><span>○</span><h3>{search ? 'Keine passenden Produkte gefunden' : 'Demnächst hier'}</h3><p>{search ? 'Versuche einen anderen Suchbegriff.' : 'Diese Auswahl wird gerade vorbereitet.'}</p></div> : <div className="product-grid">{visibleProducts.map((product, index) => <article className="product-card" key={product.id} style={{ animationDelay: `${Math.min(index * 35, 105)}ms` }}>
           <Gallery product={product} priority={index < 2} /><div className="product-info"><div><h3>{product.name}</h3><p>{product.description}</p></div><div className="product-price"><strong>{currency.format(product.priceCents / 100)}</strong><span className="stock-indicator">{product.stock} auf Lager</span></div></div>
           <button className="add-cart-button" onClick={() => addToCart(product)}>In den Warenkorb</button>
@@ -307,14 +341,17 @@ function ProductForm({ product, onSaved, onCancel }: { product?: Product; onSave
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
+    const priceValue = Number(form.price.replace(',', '.'))
     const stockValue = Number(form.stock)
+    if (!Number.isFinite(priceValue) || priceValue < 0) { setError('Bitte gib einen gültigen Preis ab 0 EUR ein.'); return }
+    if (!Number.isInteger(stockValue) || stockValue < 0) { setError('Bitte gib einen ganzzahligen Lagerbestand ab 0 ein.'); return }
     if (form.status === 'active' && stockValue <= 0) { setError('Für eine aktive Anzeige muss der Lagerbestand größer als 0 sein.'); return }
     setSaving(true)
     const data = new FormData()
     data.append('name', form.name)
     data.append('description', form.description)
     data.append('searchTerms', form.searchTerms)
-    data.append('priceCents', String(Math.round(Number(form.price.replace(',', '.')) * 100)))
+    data.append('priceCents', String(Math.round(priceValue * 100)))
     data.append('stock', form.stock)
     data.append('status', form.status)
     if (files) Array.from(files).forEach((file) => data.append('images', file))
@@ -424,6 +461,9 @@ function CategoryManager({ products }: { products: Product[] }) {
 function ChangeNotes() {
   const [open, setOpen] = useState(false)
   const entries = [
+    { date: '2026-10-19', title: 'Bestellmengen im Admin vom Bestand abbuchen', details: 'Die Admin-Bestellansicht fragt vor dem Abziehen der bestellten Mengen nach. Die Abbuchung läuft atomar und kann pro Bestellung nur einmal erfolgen.' },
+    { date: '2026-10-19', title: 'Alle Produkte als Kategorie-Karte', details: 'Die kleine Kategorie-Leiste unter der Suche entfernt. „Alle Produkte“ ist jetzt eine große Karte in der Kategorie-Reihe und zeigt ebenfalls wechselnde, per Wischgeste bedienbare Produktbilder.' },
+    { date: '2026-10-19', title: 'Startseiten-Überschrift entfernt', details: 'Die zusätzliche Überschrift über den Kategorie-Karten entfernt, damit die Startseite direkt mit den Kategorien beginnt.' },
     { date: '2026-10-19', title: 'Öffentliche Kategorienansicht überarbeitet', details: 'Kategorie-Karten vergrößert und neu gestaltet. Pro Karte erscheint ein einzelnes, proportional skaliertes Produktbild mit weichem Bildwechsel.' },
     { date: '2026-10-19', title: 'Startseite auf Kategorien fokussiert', details: 'Die Startseite zeigt jetzt nur die einzelnen Kategorien. Produkte erscheinen erst nach Auswahl oder Suche; Kategorie-Bilder wechseln einzeln, größer und ohne Verzerrung.' },
     { date: '2026-10-19', title: 'Amspind-Shopfunktionen', details: 'Kategorien auf der Startseite, Kategorie-Designauswahl, Produktzuordnung und Vorschauoptionen. Warenkorb mit teilbaren, nur für Admins lesbaren Bestellungen; fehlertolerante Suche und pflegbare Produktsuchbegriffe.' },
@@ -440,10 +480,45 @@ function ChangeNotes() {
 function OrderDetails({ token }: { token: string }) {
   const [order, setOrder] = useState<Order | null>(null)
   const [error, setError] = useState('')
-  useEffect(() => { request<Order>(`/api/admin/orders/${encodeURIComponent(token)}`).then(setOrder).catch((reason) => setError(reason instanceof Error ? reason.message : 'Bestellung konnte nicht geladen werden.')) }, [token])
-  if (error) return <div className="admin-empty" role="alert">{error}</div>
+  const [confirmDeduction, setConfirmDeduction] = useState(false)
+  const [deducting, setDeducting] = useState(false)
+  const [hasAnswered, setHasAnswered] = useState(false)
+  useEffect(() => {
+    let mounted = true
+    request<Order>(`/api/admin/orders/${encodeURIComponent(token)}`)
+      .then((nextOrder) => {
+        if (!mounted) return
+        setOrder(nextOrder)
+        setConfirmDeduction(!nextOrder.fulfilledAt)
+      })
+      .catch((reason) => {
+        if (mounted) setError(reason instanceof Error ? reason.message : 'Bestellung konnte nicht geladen werden.')
+      })
+    return () => { mounted = false }
+  }, [token])
+  const deductStock = async () => {
+    setDeducting(true)
+    setError('')
+    try {
+      await request(`/api/admin/orders/${encodeURIComponent(token)}/fulfill`, { method: 'POST' })
+      setOrder((current) => current ? { ...current, fulfilledAt: new Date().toISOString() } : current)
+      setConfirmDeduction(false)
+      setHasAnswered(true)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Bestand konnte nicht abgebucht werden.')
+      setConfirmDeduction(true)
+    } finally {
+      setDeducting(false)
+    }
+  }
+  if (error && !order) return <div className="admin-empty" role="alert">{error}</div>
   if (!order) return <div className="admin-loading">Bestellung wird geladen ...</div>
-  return <section className="order-details"><p className="eyebrow">Geteilte Bestellung</p><h1>Bestellung ansehen</h1><p className="muted">{new Date(order.createdAt).toLocaleString('de-DE')}</p>{order.items.map((item) => <div className="cart-item" key={item.productId}><strong>{item.name}</strong><span>{item.quantity} × {currency.format(item.priceCents / 100)}</span><strong>{currency.format(item.quantity * item.priceCents / 100)}</strong></div>)}<div className="cart-total"><strong>Gesamt</strong><strong>{currency.format(order.items.reduce((total, item) => total + item.quantity * item.priceCents, 0) / 100)}</strong></div></section>
+  return <section className="order-details"><p className="eyebrow">Geteilte Bestellung</p><h1>Bestellung ansehen</h1><p className="muted">{new Date(order.createdAt).toLocaleString('de-DE')}</p>{order.items.map((item) => <div className="cart-item" key={item.productId}><strong>{item.name}</strong><span>{item.quantity} × {currency.format(item.priceCents / 100)}</span><strong>{currency.format(item.quantity * item.priceCents / 100)}</strong></div>)}<div className="cart-total"><strong>Gesamt</strong><strong>{currency.format(order.items.reduce((total, item) => total + item.quantity * item.priceCents, 0) / 100)}</strong></div>
+    {order.fulfilledAt
+      ? <p className="order-stock-status" role="status">Bestand wurde am {new Date(order.fulfilledAt).toLocaleString('de-DE')} abgezogen.</p>
+      : <div className="order-stock-actions">{error && !confirmDeduction && <div className="form-error" role="alert">{error}</div>}<p className="muted">{hasAnswered ? 'Der Lagerbestand wurde nicht verändert.' : 'Der Lagerbestand wurde noch nicht verändert.'}</p><button className="primary-button" disabled={deducting} onClick={() => { setError(''); setConfirmDeduction(true) }}>Bestand jetzt abziehen</button></div>}
+    {confirmDeduction && <div className="modal-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="deduct-stock-title"><h2 id="deduct-stock-title">Bestellte Artikel vom Lagerbestand abziehen?</h2><p className="muted">Die Mengen dieser Bestellung werden einmalig vom Bestand abgezogen.</p>{error && <div className="form-error" role="alert">{error}</div>}<div><button className="primary-button" disabled={deducting} onClick={() => { void deductStock() }}>{deducting ? 'Bestand wird aktualisiert ...' : 'Ja'}</button><button className="secondary-button" disabled={deducting} onClick={() => { setConfirmDeduction(false); setHasAnswered(true) }}>Nein</button></div></section></div>}
+  </section>
 }
 
 function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: string | null }) {
@@ -459,9 +534,21 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
   const [showPassword, setShowPassword] = useState(false)
   const productsRef = useRef(products)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
-  useEffect(() => { request('/api/auth/me').then(() => setLoggedIn(true)).catch(() => setLoggedIn(false)) }, [])
+  useEffect(() => {
+    request('/api/auth/me')
+      .then(() => setLoggedIn(true))
+      .catch((reason) => {
+        setLoggedIn(false)
+        if (!(reason instanceof Error && reason.message === 'Nicht angemeldet')) {
+          setLoginError(reason instanceof Error ? reason.message : 'Anmeldestatus konnte nicht geprüft werden.')
+        }
+      })
+  }, [])
   const setProductList = (nextProducts: Product[]) => { productsRef.current = nextProducts; setProducts(nextProducts) }
   const load = () => request<Product[]>(`/api/admin/products?search=${encodeURIComponent(search)}`).then(setProductList)
+  const loadAllProducts = () => request<Product[]>('/api/admin/products')
+    .then(setAllProducts)
+    .catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Produkte konnten nicht geladen werden.'))
   const saveProductOrder = async ({ active, over }: DragEndEvent) => {
     setDraggingProductId(null)
     if (!over || active.id === over.id) return
@@ -477,8 +564,9 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
   }
   useEffect(() => {
     if (!loggedIn) return
+    setLoadError('')
     void load().catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Produkte konnten nicht geladen werden.'))
-    void request<Product[]>('/api/admin/products').then(setAllProducts).catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Produkte konnten nicht geladen werden.'))
+    void loadAllProducts()
   }, [loggedIn, search])
   if (loggedIn === null) return <div className="admin-loading">Lade ...</div>
   if (!loggedIn) return <div className="login-page"><button className="back-link" onClick={onExit}>← Zur öffentlichen Seite</button><div className="login-box"><span className="login-symbol">Amspind</span><p className="eyebrow">Produktverwaltung</p><h1>Admin-Anmeldung</h1><p className="login-intro">{orderToken ? 'Diese Bestellung ist nur nach Admin-Anmeldung sichtbar.' : 'Melde dich an, um Produkte und Kategorien zu verwalten.'}</p><form onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); try { await request('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: form.get('username'), password: form.get('password') }) }); setLoggedIn(true) } catch (e) { setLoginError(e instanceof Error ? e.message : 'Login fehlgeschlagen.') } }}><label>Benutzername<input name="username" required defaultValue="admin" /></label><label className="password-field">Passwort<div className="password-input-wrap"><input name="password" type={showPassword ? 'text' : 'password'} required /><button type="button" className="password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Passwort verbergen' : 'Passwort anzeigen'}>{showPassword ? '🙈' : '👁'}</button></div></label>{loginError && <div className="form-error">{loginError}</div>}<button className="primary-button">Anmelden <span>↗</span></button></form><p className="login-note">Nur für den internen Gebrauch.</p></div></div>
@@ -508,7 +596,7 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
       </>}
     </main>
     <ChangeNotes />
-    {editing && <div className="modal-backdrop"><div className="modal"><ProductForm product={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); void load(); void request<Product[]>('/api/admin/products').then(setAllProducts) }} />{editing !== 'new' && <div className="existing-images"><p className="eyebrow">Bilder verwalten</p><Gallery product={editing} admin onDeleteImage={async (imageId) => { await request(`/api/admin/products/${editing.id}/images/${imageId}`, { method: 'DELETE' }); const updated = await request<Product[]>(`/api/admin/products?search=${encodeURIComponent(editing.name)}`); setEditing(updated.find((item) => item.id === editing.id) || editing) }} /></div>}</div></div>}
+    {editing && <div className="modal-backdrop"><div className="modal"><ProductForm product={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); void load(); void loadAllProducts() }} />{editing !== 'new' && <div className="existing-images"><p className="eyebrow">Bilder verwalten</p><Gallery product={editing} admin onDeleteImage={async (imageId) => { try { await request(`/api/admin/products/${editing.id}/images/${imageId}`, { method: 'DELETE' }); const updated = await request<Product[]>(`/api/admin/products?search=${encodeURIComponent(editing.name)}`); setEditing(updated.find((item) => item.id === editing.id) || editing); void loadAllProducts() } catch (reason) { setLoadError(reason instanceof Error ? reason.message : 'Produktbild konnte nicht gelöscht werden.') } }} /></div>}</div></div>}
   </div>
 }
 

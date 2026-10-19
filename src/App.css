@@ -181,19 +181,15 @@ textarea { resize: vertical; min-height: 110px; }
 .public-shell .site-header .cart-button { position: relative; display: grid; justify-items: center; gap: 0; border: 0; background: transparent; color: #fff; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .public-shell .site-header .cart-button .cart-count { position: absolute; top: -7px; right: 4px; display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 50%; background: var(--accent); color: #fff; }
 .public-shell .site-header .cart-button .cart-label { display: block; color: #fff; }
-.shop-nav-bar { min-height: 42px; padding: 0 max(5vw, calc((100vw - 1280px) / 2)); overflow: hidden; background: #1d405d; }
-.shop-nav-categories { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
-.shop-nav-categories::-webkit-scrollbar { display: none; }
-.shop-nav-categories button { flex: 0 0 auto; padding: 12px 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #f2f6f8; font-size: 12px; white-space: nowrap; }
-.shop-nav-categories button:hover, .shop-nav-categories button.selected { border-bottom-color: var(--accent); color: #fff; }
 .shop-main { min-height: 70vh; }
-.category-navigation { max-width: 1600px; margin: 20px auto 0; padding: 0 max(2.4vw, 22px); }
+.category-navigation { max-width: 1600px; margin: 8px auto 0; padding: 0 max(2.4vw, 22px); }
 .promo-heading { display: flex; align-items: end; justify-content: space-between; margin: 0 2px 14px; }
 .promo-heading .eyebrow { margin-bottom: 6px; color: var(--brand-blue); }
 .promo-heading h1 { margin: 0; font-size: clamp(24px, 2.6vw, 34px); letter-spacing: -.045em; color: #15283a; }
 .promo-arrows { display: flex; gap: 8px; }
 .promo-arrows button { width: 38px; height: 38px; border: 1px solid #d8e0e7; border-radius: 50%; background: #fff; color: var(--ink); font-size: 24px; line-height: 1; box-shadow: 0 3px 10px rgba(13,35,66,.08); }
 .promo-arrows button:hover { border-color: var(--accent); color: var(--accent-hover); }
+.category-track-controls { display: flex; justify-content: flex-end; min-height: 0; margin-bottom: 8px; }
 .category-promo-track { display: flex; gap: 16px; overflow-x: auto; padding: 2px 3px 18px; scroll-snap-type: x mandatory; scrollbar-color: #bcc9d3 transparent; scrollbar-width: thin; }
 .category-promo-card { position: relative; isolation: isolate; flex: 0 0 clamp(285px, 23vw, 350px); height: 465px; display: flex; flex-direction: column; justify-content: space-between; align-items: stretch; padding: 0; overflow: hidden; border: 1px solid rgba(14,36,56,.1); border-radius: 15px; background: #e4edf3; color: #132336; text-align: left; scroll-snap-align: start; box-shadow: 0 3px 9px rgba(13,35,66,.12); transition: transform .2s ease, box-shadow .2s ease; }
 .category-promo-card:hover { transform: translateY(-3px); box-shadow: 0 12px 25px rgba(13,35,66,.16); }
@@ -214,7 +210,8 @@ textarea { resize: vertical; min-height: 110px; }
 .category-preview.category-preview-empty { grid-template-columns: 1fr; grid-template-rows: 1fr; }
 .category-promo-card .category-preview.single-image { display: block; }
 .category-promo-card .category-preview.single-image::after { position: absolute; inset: 35% 0 0; content: ""; background: linear-gradient(180deg, transparent, rgba(16,31,43,.55)); pointer-events: none; }
-.category-promo-card .category-preview.single-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; padding: 0; animation: category-image-reveal .8s ease both; }
+.category-promo-card .category-preview.single-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center; padding: 18px 18px 136px; animation: category-image-reveal .8s ease both; }
+.category-image-count { position: absolute; z-index: 2; top: 14px; right: 14px; padding: 5px 9px; border: 1px solid rgba(19,35,54,.12); border-radius: 999px; background: rgba(255,255,255,.82); color: #20364a; font-size: 11px; font-weight: 600; }
 .category-promo-card .category-preview-empty { align-content: center; justify-content: center; padding-bottom: 110px; font-size: 28px; }
 .category-empty { display: grid; gap: 8px; min-height: 260px; align-content: center; justify-items: center; border: 1px dashed #cbd5dd; border-radius: 18px; background: #fff; color: var(--ink); text-align: center; }
 .category-empty span { color: var(--muted); font-size: 14px; }
@@ -297,6 +294,9 @@ textarea { resize: vertical; min-height: 110px; }
 .change-notes-panel p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .order-details { max-width: 740px; margin: 0 auto; padding: 30px; border-radius: 18px; background: #fff; }
 .order-details h1 { margin: 0; }
+.order-stock-actions { display: grid; justify-items: start; gap: 12px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.order-stock-actions .muted { margin: 0; }
+.order-stock-status { margin: 22px 0 0; padding: 14px 16px; border-radius: 10px; background: #e7f5eb; color: #205b33; font-size: 13px; font-weight: 600; }
 
 @media (max-width: 900px) {
   .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
@@ -333,14 +333,12 @@ textarea { resize: vertical; min-height: 110px; }
   .public-shell .site-header .brand { font-size: 23px; }
   .public-shell .site-header nav { gap: 5px; }
   .shop-search { order: 3; flex: 1 0 100%; max-width: none; }
-  .shop-nav-bar { padding: 0 10px; }
-  .shop-nav-categories button { padding: 11px 9px; }
-  .category-navigation { margin-top: 18px; padding: 0 14px; }
-  .promo-heading { align-items: center; }
-  .promo-heading h1 { font-size: 24px; }
-  .promo-arrows { display: none; }
+  .category-navigation { margin-top: 8px; padding: 0 14px; }
+  .promo-arrows { display: flex; }
+  .promo-arrows button { width: 34px; height: 34px; }
   .category-promo-card { flex-basis: min(86vw, 370px); min-height: 470px; padding: 16px; }
-  .category-promo-card .category-preview { min-height: 285px; }
+  .category-promo-card .category-preview { min-height: 0; }
+  .category-promo-card .category-preview.single-image img { padding: 16px 12px 130px; }
   .collection { padding: 26px 14px 70px; }
   .collection .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .collection .product-card { padding: 7px 7px 11px; }
