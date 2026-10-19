@@ -175,7 +175,7 @@ function StorefrontHeader({ cartCount, search, onSearchChange, onSearch, onCart,
   onAdmin: () => void
 }) {
   return <header className="site-header">
-    <a className="brand" href="/"><span className="brand-mark" aria-hidden="true">›</span>Amspind</a>
+    <a className="brand" href="/"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M10 24h23m-10-11 11 11-11 11" /></svg></span>Amspind</a>
     <form className="shop-search" onSubmit={(event) => { event.preventDefault(); onSearch() }}>
       <input aria-label="Produkte suchen" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Wonach suchst du?" />
       <button aria-label="Suchen">⌕</button>
@@ -460,6 +460,14 @@ function SortableProduct({ product, disabled, onEdit, onDelete }: { product: Pro
   </article>
 }
 
+function SortableCategory({ category, selected, onSelect }: { category: Category; selected: boolean; onSelect: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } = useSortable({ id: category.id })
+  return <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={`category-admin-row ${selected ? 'selected' : ''} ${isDragging ? 'is-dragging' : ''} ${isOver ? 'is-drop-target' : ''}`}>
+    <button className="drag-handle category-drag-handle" type="button" aria-label={`${category.name} ziehen, um die Position zu ändern`} {...attributes} {...listeners}>⠿</button>
+    <button className="category-select" type="button" onClick={onSelect}>{category.name}</button>
+  </div>
+}
+
 function CategoryManager({ products }: { products: Product[] }) {
   const [categories, setCategories] = useState<Category[]>([])
   const [selectedId, setSelectedId] = useState('')
@@ -472,9 +480,14 @@ function CategoryManager({ products }: { products: Product[] }) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [draggingCategoryId, setDraggingCategoryId] = useState<string | null>(null)
+  const categoriesRef = useRef(categories)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
   const load = async () => {
     const next = await request<Category[]>('/api/admin/categories')
-    setCategories(next.filter((category) => category.id !== 'all-products'))
+    const loadedCategories = next.filter((category) => category.id !== 'all-products')
+    categoriesRef.current = loadedCategories
+    setCategories(loadedCategories)
     if (selectedId && !next.some((category) => category.id === selectedId)) setSelectedId('')
   }
   useEffect(() => { void load().catch((reason) => setError(reason instanceof Error ? reason.message : 'Kategorien konnten nicht geladen werden.')) }, [])
@@ -492,7 +505,9 @@ function CategoryManager({ products }: { products: Product[] }) {
     setError('')
     try {
       const created = await request<Category>('/api/admin/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newCategoryName.trim(), design }) })
-      setCategories((current) => [...current, created].sort((a, b) => a.sortOrder - b.sortOrder))
+      const nextCategories = [...categoriesRef.current, created].sort((a, b) => a.sortOrder - b.sortOrder)
+      categoriesRef.current = nextCategories
+      setCategories(nextCategories)
       setSelectedId(created.id)
       setNewCategoryName('')
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Kategorie konnte nicht erstellt werden.') }
@@ -512,14 +527,23 @@ function CategoryManager({ products }: { products: Product[] }) {
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Kategorie konnte nicht gespeichert werden.') }
     finally { setBusy(false) }
   }
-  const move = async (index: number, direction: number) => {
-    const next = [...categories]
-    const target = index + direction
-    if (target < 0 || target >= next.length) return
-    const reordered = arrayMove(next, index, target)
+  const saveCategoryOrder = async ({ active, over }: DragEndEvent) => {
+    setDraggingCategoryId(null)
+    if (!over || active.id === over.id) return
+    const previous = categoriesRef.current
+    const oldIndex = previous.findIndex((category) => category.id === active.id)
+    const newIndex = previous.findIndex((category) => category.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    const reordered = arrayMove(previous, oldIndex, newIndex)
+    categoriesRef.current = reordered
     setCategories(reordered)
+    setError('')
     try { await request('/api/admin/categories/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderedIds: reordered.map((category) => category.id) }) }) }
-    catch (reason) { setError(reason instanceof Error ? reason.message : 'Reihenfolge konnte nicht gespeichert werden.'); await load() }
+    catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Reihenfolge konnte nicht gespeichert werden.')
+      categoriesRef.current = previous
+      setCategories(previous)
+    }
   }
   const remove = async () => {
     if (!selected || !window.confirm(`Kategorie „${selected.name}“ löschen? Die Produkte selbst bleiben erhalten.`)) return
@@ -527,7 +551,17 @@ function CategoryManager({ products }: { products: Product[] }) {
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Kategorie konnte nicht gelöscht werden.') }
   }
   return <section className="admin-section category-manager">
-    <div className="category-admin-layout"><div className="category-admin-list"><div className="fixed-category">Alle Produkte <span>Fest</span></div>{categories.map((category, index) => <div className={`category-admin-row ${category.id === selectedId ? 'selected' : ''}`} key={category.id}><button className="category-select" onClick={() => setSelectedId(category.id)}>{category.name}</button><div><button disabled={index === 0} onClick={() => { void move(index, -1) }} aria-label="Kategorie nach oben">↑</button><button disabled={index === categories.length - 1} onClick={() => { void move(index, 1) }} aria-label="Kategorie nach unten">↓</button></div></div>)}<form className="category-create" onSubmit={(event) => { event.preventDefault(); void create() }}><input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Neue Kategorie" aria-label="Name der neuen Kategorie" maxLength={80} /><button className="secondary-button" type="submit" disabled={creating}>{creating ? 'Wird hinzugefügt ...' : 'Hinzufügen'}</button></form></div>
+    <div className="category-admin-layout"><div className="category-admin-list"><div className="category-list-heading"><strong>Kategorien</strong><span>{categories.length} Kategorien</span></div><div className="fixed-category"><span className="category-static-icon">—</span><span className="category-static-name">Alle Produkte</span><span className="category-fixed-label">Fest</span></div>
+      {error && <div className="form-error" role="alert">{error}</div>}
+      <p className="reorder-hint">Kategorien am Griffpunkt ziehen, um sie anzuordnen.</p>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={({ active }) => setDraggingCategoryId(String(active.id))} onDragCancel={() => setDraggingCategoryId(null)} onDragEnd={(event) => { void saveCategoryOrder(event) }}>
+        <SortableContext items={categories.map((category) => category.id)} strategy={verticalListSortingStrategy}>
+          <div className="category-sortable-list">{categories.map((category) => <SortableCategory key={category.id} category={category} selected={category.id === selectedId} onSelect={() => setSelectedId(category.id)} />)}</div>
+        </SortableContext>
+        <DragOverlay>{categories.find((category) => category.id === draggingCategoryId) && <div className="category-admin-row category-admin-row-overlay"><span className="drag-handle category-drag-handle" aria-hidden="true">⠿</span><span className="category-select">{categories.find((category) => category.id === draggingCategoryId)?.name}</span></div>}</DragOverlay>
+      </DndContext>
+      <form className="category-create" onSubmit={(event) => { event.preventDefault(); void create() }}><label htmlFor="new-category-name">Neue Kategorie</label><input id="new-category-name" value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Kategoriename" aria-label="Name der neuen Kategorie" maxLength={80} /><button className="primary-button" type="submit" disabled={creating}>{creating ? 'Wird hinzugefügt ...' : '+ Kategorie hinzufügen'}</button></form>
+    </div>
       <div className="category-editor">{selected ? <>
         <label>Kategoriename<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label>
         <label>Design<select value={design} onChange={(event) => setDesign(event.target.value)}>{categoryDesigns.map((option) => <option key={option} value={option}>{option}</option>)}</select><small>Die auswählbaren Designs werden später visuell ausgestaltet.</small></label>
@@ -535,8 +569,7 @@ function CategoryManager({ products }: { products: Product[] }) {
         {previewMode === 'upload' && <label className="file-drop">Kategorie-Bild<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => setPreviewFile(event.target.files?.[0] || null)} /><span>{previewFile?.name || (selected.previewImageUrl ? 'Bild vorhanden – neues Bild auswählen zum Ersetzen' : 'Bild auswählen')}</span></label>}
         <fieldset className="product-picker"><legend>Produkte dieser Kategorie</legend>{products.length ? products.map((product) => <label key={product.id} className="product-choice"><input type="checkbox" checked={selectedProducts.includes(product.id)} onChange={(event) => setSelectedProducts((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} /><span>{product.name} <small>{product.status === 'unlisted' ? '· Nicht gelistet (öffentlich ausgeblendet)' : ''}</small></span></label>) : <p className="muted">Noch keine Produkte angelegt.</p>}</fieldset>
         <div className="category-editor-actions"><button className="primary-button" disabled={busy} onClick={() => { void save() }}>{busy ? 'Wird gespeichert ...' : 'Kategorie speichern'}</button><button className="delete-button" onClick={() => { void remove() }}>Kategorie löschen</button></div>
-      </> : <p className="muted">Wähle eine Kategorie aus oder erstelle eine neue.</p>}</div></div>
-    {error && <div className="form-error" role="alert">{error}</div>}
+      </> : <div className="category-editor-empty"><span aria-hidden="true">↖</span><p className="muted">Wähle links eine Kategorie aus, um sie zu öffnen und zu bearbeiten.</p></div>}</div></div>
   </section>
 }
 
@@ -663,18 +696,18 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
     catch (reason) { setLoadError(reason instanceof Error ? reason.message : 'Produkt konnte nicht gelöscht werden.') }
   }
   return <div className="admin-shell">
-    <header className="admin-header"><a className="brand admin-brand" href="#"><span className="brand-mark" aria-hidden="true">›</span>Amspind</a><div className="admin-title"><strong>Produktverwaltung</strong><span>Amspind</span></div><div className="admin-actions"><button className="text-button" onClick={onExit}>Öffentliche Seite</button><button className="logout" onClick={async () => { await request('/api/auth/logout', { method: 'POST' }); setLoggedIn(false) }}>Abmelden</button></div></header>
+    <header className="admin-header"><a className="brand admin-brand" href="#"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M10 24h23m-10-11 11 11-11 11" /></svg></span>Amspind</a><div className="admin-title"><strong>Produktverwaltung</strong><span>Amspind</span></div><div className="admin-actions"><button className="text-button" onClick={onExit}>Öffentliche Seite</button><button className="logout" onClick={async () => { await request('/api/auth/logout', { method: 'POST' }); setLoggedIn(false) }}>Abmelden</button></div></header>
     <main className="admin-main">
       {orderToken ? <OrderDetails token={orderToken} /> : <>
-        <div className="admin-intro"><div><p className="eyebrow">Übersicht</p><h1>Verwaltung</h1><p className="muted">Produkte und Startseite an einem Ort verwalten.</p></div><button className="primary-button compact" onClick={() => setEditing('new')}>+ Produkt hinzufügen</button></div>
-        <details className="admin-accordion category-accordion">
+        <div className="admin-intro"><div><p className="eyebrow">Übersicht</p><h1>Verwaltung</h1><p className="muted">Produkte und Startseite an einem Ort verwalten.</p></div></div>
+        <details className="admin-accordion category-accordion" open>
           <summary><span className="accordion-summary-copy"><strong>Startseite & Kategorien</strong><small>Kategorien erstellen, sortieren und Produkte zuordnen</small></span></summary>
           <CategoryManager products={allProducts} />
         </details>
         <details className="admin-accordion products-accordion" open>
           <summary><span className="accordion-summary-copy"><strong>Produkte</strong><small>{products.length} Produkte · suchen, bearbeiten und sortieren</small></span></summary>
-        <section className="admin-section product-management-panel"><div className="admin-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nach Produkt suchen ..." /></label><span>{products.length} Produkte</span></div>
-          <p className="reorder-hint">{search ? 'Suche leeren, um die Artikelreihenfolge zu ändern.' : 'Artikel am Griffpunkt ziehen, um sie anzuordnen.'}</p>
+        <section className="admin-section product-management-panel"><div className="admin-panel-actions"><p className="reorder-hint">{search ? 'Suche leeren, um die Artikelreihenfolge zu ändern.' : 'Artikel am Griffpunkt ziehen, um sie anzuordnen.'}</p><button className="primary-button compact" onClick={() => setEditing('new')}>+ Produkt hinzufügen</button></div>
+          <div className="admin-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nach Produkt suchen ..." /></label><span>{products.length} Produkte</span></div>
           {reorderError && <div className="form-error">{reorderError}</div>}{loadError && <div className="form-error" role="alert">{loadError}</div>}
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={({ active }) => setDraggingProductId(Number(active.id))} onDragCancel={() => setDraggingProductId(null)} onDragEnd={(event) => { void saveProductOrder(event) }}>
             <SortableContext items={products.map((product) => product.id)} strategy={verticalListSortingStrategy}><div className="admin-list">
