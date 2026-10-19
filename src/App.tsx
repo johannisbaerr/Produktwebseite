@@ -129,21 +129,17 @@ function Gallery({ product, admin = false, priority = false, onDeleteImage }: { 
 }
 
 function CategoryPreview({ category, products }: { category: Category; products: Product[] }) {
-  const images = products.flatMap((product) => product.images.slice(0, 1).map((image) => image.url)).slice(0, 4)
+  const images = [...new Set(products.flatMap((product) => product.images.map((image) => image.url)))]
   const [active, setActive] = useState(0)
   useEffect(() => {
+    setActive(0)
     if (category.previewMode !== 'products' || images.length < 2) return
     const timer = window.setInterval(() => setActive((current) => (current + 1) % images.length), 3500)
     return () => window.clearInterval(timer)
-  }, [category.previewMode, images.length])
+  }, [category.id, category.previewMode, images.length])
   if (category.previewMode === 'upload') return <div className={`category-preview single-image ${category.design.toLowerCase()}`}>{category.previewImageUrl ? <img className="preview-active" src={category.previewImageUrl} alt="" /> : <span className="category-preview-empty">Bild auswählen</span>}</div>
   if (!images.length) return <div className={`category-preview category-preview-empty ${category.design.toLowerCase()}`}>Amspind</div>
-  return <div className={`category-preview ${category.design.toLowerCase()}`}>
-    {Array.from({ length: Math.min(4, images.length) }, (_, index) => {
-      const url = images[(active + index) % images.length]
-      return <img key={`${index}-${url}`} src={url} alt="" />
-    })}
-  </div>
+  return <div className={`category-preview single-image ${category.design.toLowerCase()}`}><img key={images[active % images.length]} className="preview-active" src={images[active % images.length]} alt="" /></div>
 }
 
 function PublicView({ onAdmin }: { onAdmin: () => void }) {
@@ -152,21 +148,27 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const [loading, setLoading] = useState(() => readPublicProductsCache().length === 0)
   const [loadError, setLoadError] = useState('')
   const [search, setSearch] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState('all-products')
+  const [selectedCategory, setSelectedCategory] = useState('')
   const [cart, setCart] = useState<CartItem[]>(readCart)
   const [cartOpen, setCartOpen] = useState(false)
   const [clearCartPrompt, setClearCartPrompt] = useState(false)
   const [shareLink, setShareLink] = useState('')
   const [cartError, setCartError] = useState('')
   const hasCatalogRef = useRef(false)
+  const categoryCardsRef = useRef<HTMLDivElement>(null)
   const sortedCategories = useMemo(() => [allProductsCategory, ...categories.filter((category) => category.id !== 'all-products').sort((a, b) => a.sortOrder - b.sortOrder)], [categories])
+  const displayCategories = sortedCategories.filter((category) => category.id !== 'all-products')
   const categoriesForProduct = (product: Product) => sortedCategories.filter((category) => category.id !== 'all-products' && category.productIds.includes(product.id)).map((category) => category.name)
   const visibleProducts = useMemo(() => products.filter((product) => {
-    const inCategory = selectedCategory === 'all-products' || sortedCategories.find((category) => category.id === selectedCategory)?.productIds.includes(product.id)
+    const inCategory = !selectedCategory || selectedCategory === 'all-products' || sortedCategories.find((category) => category.id === selectedCategory)?.productIds.includes(product.id)
     return inCategory && matchesSearch(product, categoriesForProduct(product), search)
   }), [products, search, selectedCategory, sortedCategories])
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0)
   const cartTotal = cart.reduce((total, item) => total + item.quantity * (products.find((product) => product.id === item.productId)?.priceCents || 0), 0)
+
+  useEffect(() => {
+    if (selectedCategory) document.getElementById('collection')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [selectedCategory])
 
   useEffect(() => {
     let mounted = true
@@ -259,22 +261,27 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
 
   return <div className="public-shell">
     <header className="site-header"><a className="brand" href="/">Amspind<span className="brand-mark">›</span></a>
-      <form className="shop-search" onSubmit={(event) => event.preventDefault()}><input aria-label="Produkte suchen" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Produkte suchen" /><button aria-label="Suchen">⌕</button></form>
-      <nav><button className="cart-button" onClick={() => setCartOpen(true)}>Warenkorb <span>{cartCount}</span></button><button className="admin-link" onClick={onAdmin}>Admin-Anmeldung <span>↗</span></button></nav>
+      <form className="shop-search" onSubmit={(event) => { event.preventDefault(); setSelectedCategory('all-products') }}><input aria-label="Produkte suchen" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Wonach suchst du?" /><button aria-label="Suchen">⌕</button></form>
+      <nav><button className="cart-button" onClick={() => setCartOpen(true)}><span className="cart-label">Warenkorb</span><span className="cart-count">{cartCount}</span></button><button className="admin-link" onClick={onAdmin}>Admin-Anmeldung <span>↗</span></button></nav>
     </header>
     <main className="shop-main">
-      <section className="category-navigation" aria-label="Produktkategorien"><p className="eyebrow">Kategorien</p><div className="category-tiles">{sortedCategories.map((category) => {
-        const categoryProducts = category.id === 'all-products' ? products : products.filter((product) => category.productIds.includes(product.id))
-        return <button key={category.id} className={`category-tile ${selectedCategory === category.id ? 'selected' : ''}`} onClick={() => setSelectedCategory(category.id)}>
-          <CategoryPreview category={category} products={categoryProducts} /><span>{category.name}</span><small>{categoryProducts.length} Artikel</small>
-        </button>
-      })}</div></section>
-      <section className="collection" id="collection"><div className="section-heading"><div><p className="eyebrow">Die aktuelle Auswahl</p><h1>{sortedCategories.find((category) => category.id === selectedCategory)?.name || 'Alle Produkte'}</h1></div><span className="product-total">{visibleProducts.length.toString().padStart(2, '0')} Artikel</span></div>
+      <div className="shop-nav-bar"><nav className="shop-nav-categories" aria-label="Produktkategorien">{sortedCategories.map((category) => <button key={category.id} className={selectedCategory === category.id ? 'selected' : ''} onClick={() => setSelectedCategory(category.id)}>{category.name}</button>)}</nav></div>
+      <section className="category-navigation" aria-label="Entdecke Kategorien">
+        <div className="promo-heading"><div><p className="eyebrow">Entdecke Amspind</p><h1>Finde deinen Favoriten</h1></div>{displayCategories.length > 3 && <div className="promo-arrows"><button aria-label="Kategorien nach links" onClick={() => categoryCardsRef.current?.scrollBy({ left: -380, behavior: 'smooth' })}>‹</button><button aria-label="Kategorien nach rechts" onClick={() => categoryCardsRef.current?.scrollBy({ left: 380, behavior: 'smooth' })}>›</button></div>}</div>
+        {displayCategories.length ? <div className="category-promo-track" ref={categoryCardsRef}>{displayCategories.map((category) => {
+          const categoryProducts = products.filter((product) => category.productIds.includes(product.id))
+          return <button key={category.id} className="category-promo-card" onClick={() => setSelectedCategory(category.id)}>
+            <CategoryPreview category={category} products={categoryProducts} />
+            <div className="category-promo-copy"><span className="category-promo-kicker">Amspind Auswahl</span><h2>{category.name}</h2><p>{categoryProducts.length} {categoryProducts.length === 1 ? 'Produkt' : 'Produkte'} für deine Pause</p><span className="category-promo-link">Jetzt entdecken <span aria-hidden="true">→</span></span></div>
+          </button>
+        })}</div> : <div className="category-empty"><strong>Deine Auswahl wird vorbereitet</strong><span>Bald findest du hier die Kategorien aus dem Spind.</span></div>}
+      </section>
+      {(selectedCategory || search) && <section className="collection" id="collection"><div className="section-heading"><div><p className="eyebrow">{search ? 'Suchergebnisse' : 'Die aktuelle Auswahl'}</p><h2>{sortedCategories.find((category) => category.id === selectedCategory)?.name || 'Alle Produkte'}</h2></div><button className="back-to-categories" onClick={() => { setSelectedCategory(''); setSearch(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>← Kategorien</button><span className="product-total">{visibleProducts.length.toString().padStart(2, '0')} Artikel</span></div>
         {loading ? <div className="loading">Produkte werden geladen ...</div> : loadError ? <div className="loading" role="alert">{loadError}</div> : visibleProducts.length === 0 ? <div className="empty-public"><span>○</span><h3>{search ? 'Keine passenden Produkte gefunden' : 'Demnächst hier'}</h3><p>{search ? 'Versuche einen anderen Suchbegriff.' : 'Diese Auswahl wird gerade vorbereitet.'}</p></div> : <div className="product-grid">{visibleProducts.map((product, index) => <article className="product-card" key={product.id} style={{ animationDelay: `${Math.min(index * 35, 105)}ms` }}>
           <Gallery product={product} priority={index < 2} /><div className="product-info"><div><h3>{product.name}</h3><p>{product.description}</p></div><div className="product-price"><strong>{currency.format(product.priceCents / 100)}</strong><span className="stock-indicator">{product.stock} auf Lager</span></div></div>
           <button className="add-cart-button" onClick={() => addToCart(product)}>In den Warenkorb</button>
         </article>)}</div>}
-      </section>
+      </section>}
     </main>
     <footer><span>Amspind <small>Dein Spind, deine Auswahl.</small></span><span>© {new Date().getFullYear()}</span></footer>
     {cartOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false) }}><section className="cart-panel" aria-label="Warenkorb"><div className="form-header"><div><p className="eyebrow">Deine Auswahl</p><h2>Warenkorb</h2></div><button className="icon-button" onClick={() => setCartOpen(false)} aria-label="Schließen">×</button></div>
@@ -417,6 +424,8 @@ function CategoryManager({ products }: { products: Product[] }) {
 function ChangeNotes() {
   const [open, setOpen] = useState(false)
   const entries = [
+    { date: '2026-10-19', title: 'Öffentliche Kategorienansicht überarbeitet', details: 'Kategorie-Karten vergrößert und neu gestaltet. Pro Karte erscheint ein einzelnes, proportional skaliertes Produktbild mit weichem Bildwechsel.' },
+    { date: '2026-10-19', title: 'Startseite auf Kategorien fokussiert', details: 'Die Startseite zeigt jetzt nur die einzelnen Kategorien. Produkte erscheinen erst nach Auswahl oder Suche; Kategorie-Bilder wechseln einzeln, größer und ohne Verzerrung.' },
     { date: '2026-10-19', title: 'Amspind-Shopfunktionen', details: 'Kategorien auf der Startseite, Kategorie-Designauswahl, Produktzuordnung und Vorschauoptionen. Warenkorb mit teilbaren, nur für Admins lesbaren Bestellungen; fehlertolerante Suche und pflegbare Produktsuchbegriffe.' },
     { date: '2026-09-28', title: 'Versionsstände 1.1 bis 1.4', details: 'Weitere Versionsstände des Shops wurden im Repository festgehalten.' },
     { date: '2026-09-25', title: 'Produktreihenfolge beim Bearbeiten erhalten', details: 'Die bestehende Reihenfolge der Produkte bleibt beim Bearbeiten erhalten.' },
