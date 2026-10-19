@@ -700,11 +700,11 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
     <main className="admin-main">
       {orderToken ? <OrderDetails token={orderToken} /> : <>
         <div className="admin-intro"><div><p className="eyebrow">Übersicht</p><h1>Verwaltung</h1><p className="muted">Produkte und Startseite an einem Ort verwalten.</p></div></div>
-        <details className="admin-accordion category-accordion" open>
+        <details className="admin-accordion category-accordion">
           <summary><span className="accordion-summary-copy"><strong>Startseite & Kategorien</strong><small>Kategorien erstellen, sortieren und Produkte zuordnen</small></span></summary>
           <CategoryManager products={allProducts} />
         </details>
-        <details className="admin-accordion products-accordion" open>
+        <details className="admin-accordion products-accordion">
           <summary><span className="accordion-summary-copy"><strong>Produkte</strong><small>{products.length} Produkte · suchen, bearbeiten und sortieren</small></span></summary>
         <section className="admin-section product-management-panel"><div className="admin-panel-actions"><p className="reorder-hint">{search ? 'Suche leeren, um die Artikelreihenfolge zu ändern.' : 'Artikel am Griffpunkt ziehen, um sie anzuordnen.'}</p><button className="primary-button compact" onClick={() => setEditing('new')}>+ Produkt hinzufügen</button></div>
           <div className="admin-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nach Produkt suchen ..." /></label><span>{products.length} Produkte</span></div>
