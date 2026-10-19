@@ -205,6 +205,7 @@ textarea { resize: vertical; min-height: 110px; }
 .category-promo-card:nth-child(6n + 4) { background: #d3e4b5; }
 .category-promo-card:nth-child(6n + 5) { background: #f2df9c; }
 .category-promo-card:nth-child(6n) { background: #c0dce5; }
+.category-promo-card.all-products-category { border-color: #d9e1e7; background: #f7f9fa; color: #172a3c; }
 .category-promo-copy { position: relative; z-index: 2; margin-top: auto; padding: 22px 21px 20px; background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,.12) 100%); }
 .category-promo-copy > span { display: block; margin-bottom: 7px; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; opacity: .75; }
 .category-promo-copy h2 { margin: 0; font-size: clamp(25px, 2.5vw, 34px); line-height: 1.02; letter-spacing: -.045em; }
@@ -216,6 +217,13 @@ textarea { resize: vertical; min-height: 110px; }
 .category-promo-card .category-preview.single-image { display: block; }
 .category-promo-card .category-preview.single-image::after { position: absolute; inset: 35% 0 0; content: ""; background: linear-gradient(180deg, transparent, rgba(16,31,43,.55)); pointer-events: none; }
 .category-promo-card .category-preview.single-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center; padding: 18px 18px 136px; animation: category-image-reveal .8s ease both; }
+.category-promo-card.all-products-category .category-preview.single-image { inset: 16px 16px 156px; width: auto; height: auto; overflow: hidden; border: 1px solid #e6eaed; border-radius: 11px; background: #fff; box-shadow: 0 3px 12px rgba(13,35,66,.07); }
+.category-promo-card.all-products-category .category-preview.single-image::after { display: none; }
+.category-promo-card.all-products-category .category-preview.single-image img { padding: 18px; }
+.category-promo-card.all-products-category .category-promo-copy { padding: 18px 20px 20px; background: #f7f9fa; }
+.category-promo-card.all-products-category .category-promo-copy h2 { color: #172a3c; }
+.category-promo-card.all-products-category .category-promo-copy p { color: #5d6d7d; opacity: 1; }
+.category-promo-card.all-products-category .category-promo-link { border-color: #d9e1e7; background: #fff; color: #173f63; }
 .category-image-count { position: absolute; z-index: 2; top: 14px; right: 14px; padding: 5px 9px; border: 1px solid rgba(19,35,54,.12); border-radius: 999px; background: rgba(255,255,255,.82); color: #20364a; font-size: 11px; font-weight: 600; }
 .category-promo-card .category-preview-empty { align-content: center; justify-content: center; padding-bottom: 110px; font-size: 28px; }
 .category-empty { display: grid; gap: 8px; min-height: 260px; align-content: center; justify-items: center; border: 1px dashed #cbd5dd; border-radius: 18px; background: #fff; color: var(--ink); text-align: center; }

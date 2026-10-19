@@ -82,12 +82,12 @@ app.get('/api/categories', async (_req, res) => {
   const { data: categories, error } = await supabase.from('categories').select('id,name,sort_order,design,preview_mode,preview_image').order('sort_order', { ascending: true })
   if (error) {
     console.error('Category query failed:', error.code, error.message)
-    return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: isMissingShopSchema(error) ? shopMigrationMessage : 'Kategorien konnten nicht geladen werden.' })
+    return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: 'Kategorien sind derzeit nicht verfügbar.' })
   }
   const { data: memberships, error: membershipError } = await supabase.from('product_categories').select('category_id,product_id')
   if (membershipError) {
     console.error('Category membership query failed:', membershipError.code, membershipError.message)
-    return res.status(isMissingShopSchema(membershipError) ? 503 : 500).json({ error: isMissingShopSchema(membershipError) ? shopMigrationMessage : 'Kategoriezuordnungen konnten nicht geladen werden.' })
+    return res.status(isMissingShopSchema(membershipError) ? 503 : 500).json({ error: 'Kategorien sind derzeit nicht verfügbar.' })
   }
   res.json((categories || []).map((category) => categoryPayload(
     category,
@@ -105,7 +105,7 @@ app.get('/api/products', async (_req, res) => {
   }
   if (error) {
     console.error('Product query failed:', error.code, error.message)
-    return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: isMissingShopSchema(error) ? shopMigrationMessage : 'Produkte konnten nicht geladen werden.' })
+    return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: 'Produkte sind derzeit nicht verfügbar.' })
   }
   res.json((data as ProductRow[]).map(productPayload))
 })
