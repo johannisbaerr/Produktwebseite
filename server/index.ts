@@ -183,9 +183,15 @@ app.post('/api/admin/categories', auth, async (req, res) => {
   if (name.toLocaleLowerCase('de-DE') === 'alle produkte') return res.status(400).json({ error: '„Alle Produkte“ ist bereits als feste Kategorie vorhanden.' })
   if (!categoryDesigns.includes(design as typeof categoryDesigns[number])) return res.status(400).json({ error: 'Ungültiges Kategorie-Design.' })
   const { data: last, error: lookupError } = await supabase.from('categories').select('sort_order').order('sort_order', { ascending: false }).limit(1).maybeSingle()
-  if (lookupError) return res.status(500).json({ error: 'Kategorie-Reihenfolge konnte nicht geladen werden.' })
+  if (lookupError) {
+    console.error('Category create order lookup failed:', lookupError.code, lookupError.message)
+    return res.status(isMissingShopSchema(lookupError) ? 503 : 500).json({ error: isMissingShopSchema(lookupError) ? shopMigrationMessage : 'Kategorie-Reihenfolge konnte nicht geladen werden.' })
+  }
   const { data, error } = await supabase.from('categories').insert({ name, design, sort_order: (last?.sort_order ?? 0) + 1 }).select('id,name,sort_order,design,preview_mode,preview_image').single()
-  if (error) return res.status(500).json({ error: 'Kategorie konnte nicht erstellt werden.' })
+  if (error) {
+    console.error('Category create failed:', error.code, error.message)
+    return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: isMissingShopSchema(error) ? shopMigrationMessage : 'Kategorie konnte nicht erstellt werden.' })
+  }
   res.status(201).json(categoryPayload(data, []))
 })
 

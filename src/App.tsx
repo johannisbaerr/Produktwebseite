@@ -175,7 +175,7 @@ function StorefrontHeader({ cartCount, search, onSearchChange, onSearch, onCart,
   onAdmin: () => void
 }) {
   return <header className="site-header">
-    <a className="brand" href="/">Amspind<span className="brand-mark">›</span></a>
+    <a className="brand" href="/"><span className="brand-mark" aria-hidden="true">›</span>Amspind</a>
     <form className="shop-search" onSubmit={(event) => { event.preventDefault(); onSearch() }}>
       <input aria-label="Produkte suchen" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Wonach suchst du?" />
       <button aria-label="Suchen">⌕</button>
@@ -206,6 +206,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const [shareLink, setShareLink] = useState('')
   const [cartError, setCartError] = useState('')
   const categoryCardsRef = useRef<HTMLDivElement>(null)
+  const isFullCatalog = selectedCategory === 'all-products'
   const sortedCategories = useMemo(() => [allProductsCategory, ...categories.filter((category) => category.id !== 'all-products').sort((a, b) => a.sortOrder - b.sortOrder)], [categories])
   const displayCategories = sortedCategories
   const categoriesForProduct = (product: Product) => sortedCategories.filter((category) => category.id !== 'all-products' && category.productIds.includes(product.id)).map((category) => category.name)
@@ -350,7 +351,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   return <div className="public-shell">
     {!cartOpen && cartHeader}
     <main className="shop-main">
-      <section className="category-navigation" aria-label="Entdecke Kategorien">
+      {!isFullCatalog && <section className="category-navigation" aria-label="Entdecke Kategorien">
         {loading ? <div className="loading">Kategorien werden geladen ...</div> : <>{loadError && <div className="loading" role="alert">{loadError}</div>}{categoryError && <div className="loading" role="alert">{categoryError}</div>}{displayCategories.length ? <><div className="category-track-controls">{displayCategories.length > 3 && <div className="promo-arrows"><button aria-label="Kategorien nach links" onClick={() => categoryCardsRef.current?.scrollBy({ left: -380, behavior: 'smooth' })}>‹</button><button aria-label="Kategorien nach rechts" onClick={() => categoryCardsRef.current?.scrollBy({ left: 380, behavior: 'smooth' })}>›</button></div>}</div><div className="category-promo-track" ref={categoryCardsRef}>{displayCategories.map((category) => {
           const categoryProducts = category.id === 'all-products' ? products : products.filter((product) => category.productIds.includes(product.id))
           return <button key={category.id} className={`category-promo-card ${category.id === 'all-products' ? 'all-products-category' : ''}`} onClick={() => setSelectedCategory(category.id)}>
@@ -358,15 +359,15 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
             <div className="category-promo-copy"><span className="category-promo-kicker">Amspind Auswahl</span><h2>{category.name}</h2><p>{categoryProducts.length} {categoryProducts.length === 1 ? 'Produkt' : 'Produkte'} für deine Pause</p><span className="category-promo-link">Jetzt entdecken <span aria-hidden="true">→</span></span></div>
           </button>
         })}</div></> : <div className="category-empty"><strong>Deine Auswahl wird vorbereitet</strong><span>Bald findest du hier die Kategorien aus dem Spind.</span></div>}</>}
-      </section>
-      {(selectedCategory || search) && <section className="collection" id="collection"><div className="section-heading"><div><p className="eyebrow">{search ? 'Suchergebnisse' : 'Die aktuelle Auswahl'}</p><h2>{sortedCategories.find((category) => category.id === selectedCategory)?.name || 'Alle Produkte'}</h2></div><button className="back-to-categories" onClick={() => { setSelectedCategory(''); setSearch(''); setCartError(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>← Kategorien</button><span className="product-total">{visibleProducts.length.toString().padStart(2, '0')} Artikel</span></div>
+      </section>}
+      {(selectedCategory || search) && <section className={`collection ${isFullCatalog ? 'full-catalog' : ''}`} id="collection"><div className="section-heading"><div><p className="eyebrow">{search ? 'Suchergebnisse' : 'Die aktuelle Auswahl'}</p><h2>{sortedCategories.find((category) => category.id === selectedCategory)?.name || 'Alle Produkte'}</h2></div><button className="back-to-categories" onClick={() => { setSelectedCategory(''); setSearch(''); setCartError(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>← Kategorien</button><span className="product-total">{visibleProducts.length.toString().padStart(2, '0')} Artikel</span></div>
         {loading ? <div className="loading">Produkte werden geladen ...</div> : loadError ? <div className="loading" role="alert">{loadError}</div> : visibleProducts.length === 0 ? <div className="empty-public"><span>○</span><h3>{search ? 'Keine passenden Produkte gefunden' : 'Demnächst hier'}</h3><p>{search ? 'Versuche einen anderen Suchbegriff.' : 'Diese Auswahl wird gerade vorbereitet.'}</p></div> : <div className="product-grid">{visibleProducts.map((product, index) => <article className="product-card" key={product.id} style={{ animationDelay: `${Math.min(index * 35, 105)}ms` }}>
           <Gallery product={product} priority={index < 2} /><div className="product-info"><div><h3>{product.name}</h3><p>{product.description}</p></div><div className="product-price"><strong>{currency.format(product.priceCents / 100)}</strong><span className="stock-indicator">{product.stock} auf Lager</span></div></div>
           <button className="add-cart-button" onClick={() => addToCart(product)}>In den Warenkorb</button>
         </article>)}</div>}
       </section>}
     </main>
-    <footer><span>Amspind <small>Dein Spind, deine Auswahl.</small></span><span>© {new Date().getFullYear()}</span></footer>
+    {!isFullCatalog && <footer><span>Amspind <small>Dein Spind, deine Auswahl.</small></span><span>© {new Date().getFullYear()}</span></footer>}
     {cartOpen && <div className="cart-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false) }}>{cartHeader}<section className="cart-panel" role="dialog" aria-modal="true" aria-labelledby="cart-title">
       <div className="cart-page-title"><p className="eyebrow">Deine Auswahl</p><h2 id="cart-title">Warenkorb <span>({cartCount} Artikel)</span></h2></div>
       <div className="cart-page-content">
@@ -451,6 +452,7 @@ function CategoryManager({ products }: { products: Product[] }) {
   const [previewFile, setPreviewFile] = useState<File | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [creating, setCreating] = useState(false)
   const load = async () => {
     const next = await request<Category[]>('/api/admin/categories')
     setCategories(next.filter((category) => category.id !== 'all-products'))
@@ -467,13 +469,15 @@ function CategoryManager({ products }: { products: Product[] }) {
   }, [selected])
   const create = async () => {
     if (!newCategoryName.trim()) { setError('Bitte gib einen Kategorienamen ein.'); return }
+    setCreating(true)
+    setError('')
     try {
       const created = await request<Category>('/api/admin/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newCategoryName.trim(), design }) })
-      await load()
+      setCategories((current) => [...current, created].sort((a, b) => a.sortOrder - b.sortOrder))
       setSelectedId(created.id)
       setNewCategoryName('')
-      setError('')
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Kategorie konnte nicht erstellt werden.') }
+    finally { setCreating(false) }
   }
   const save = async () => {
     if (!selected) return
@@ -504,7 +508,7 @@ function CategoryManager({ products }: { products: Product[] }) {
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Kategorie konnte nicht gelöscht werden.') }
   }
   return <section className="admin-section category-manager"><div className="section-heading"><div><p className="eyebrow">Startseite gestalten</p><h2>Kategorien</h2></div><span className="admin-meta">„Alle Produkte“ ist immer sichtbar.</span></div>
-    <div className="category-admin-layout"><div className="category-admin-list"><div className="fixed-category">Alle Produkte <span>Fest</span></div>{categories.map((category, index) => <div className={`category-admin-row ${category.id === selectedId ? 'selected' : ''}`} key={category.id}><button className="category-select" onClick={() => setSelectedId(category.id)}>{category.name}</button><div><button disabled={index === 0} onClick={() => { void move(index, -1) }} aria-label="Kategorie nach oben">↑</button><button disabled={index === categories.length - 1} onClick={() => { void move(index, 1) }} aria-label="Kategorie nach unten">↓</button></div></div>)}<div className="category-create"><input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Neue Kategorie" /><button className="secondary-button" onClick={() => { void create() }}>Hinzufügen</button></div></div>
+    <div className="category-admin-layout"><div className="category-admin-list"><div className="fixed-category">Alle Produkte <span>Fest</span></div>{categories.map((category, index) => <div className={`category-admin-row ${category.id === selectedId ? 'selected' : ''}`} key={category.id}><button className="category-select" onClick={() => setSelectedId(category.id)}>{category.name}</button><div><button disabled={index === 0} onClick={() => { void move(index, -1) }} aria-label="Kategorie nach oben">↑</button><button disabled={index === categories.length - 1} onClick={() => { void move(index, 1) }} aria-label="Kategorie nach unten">↓</button></div></div>)}<div className="category-create"><input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Neue Kategorie" /><button className="secondary-button" disabled={creating} onClick={() => { void create() }}>{creating ? 'Wird hinzugefügt ...' : 'Hinzufügen'}</button></div></div>
       <div className="category-editor">{selected ? <>
         <label>Kategoriename<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label>
         <label>Design<select value={design} onChange={(event) => setDesign(event.target.value)}>{categoryDesigns.map((option) => <option key={option} value={option}>{option}</option>)}</select><small>Die auswählbaren Designs werden später visuell ausgestaltet.</small></label>
@@ -520,6 +524,8 @@ function CategoryManager({ products }: { products: Product[] }) {
 function ChangeNotes() {
   const [open, setOpen] = useState(false)
   const entries = [
+    { date: '2026-10-19', title: 'Kategorien im Admin zuverlässiger anlegen', details: 'Beim Erstellen einer Kategorie werden Datenbankfehler jetzt protokolliert und fehlende Shop-Migrationen verständlich gemeldet. Nach erfolgreichem Anlegen erscheint die Kategorie direkt in der Liste.' },
+    { date: '2026-10-19', title: 'Produktliste und Logo überarbeitet', details: 'Produktauflistungen sind jetzt klare, breite Zeilen mit Bild links, gut lesbaren Produktdetails und eigener Warenkorb-Schaltfläche. „Alle Produkte“ öffnet eine vollständige Ansicht statt die Liste unter den Kategorien auszuklappen. Das Logo zeigt nun den orangefarbenen Pfeil auf Dunkelblau.' },
     { date: '2026-10-19', title: 'Ladefehler und Kopfzeilen behoben', details: 'Produkte und Kategorien laden unabhängig voneinander. Vorhandene Produkte bleiben bei fehlender Shop-Migration sichtbar, und Datenbankfehler nennen jetzt den nötigen Einrichtungsschritt. Der Warenkorb nutzt dieselbe Kopfzeile wie die Startseite; der Admin-Zugang ist ein zugängliches Profilsymbol.' },
     { date: '2026-10-19', title: 'Warenkorb auf Vollbild umgestellt', details: 'Der Warenkorb öffnet jetzt als vollständige, bildschirmfüllende Ansicht mit Produktliste und separater Zwischensumme. Die Artikelanzahl sitzt direkt über dem Warenkorb-Symbol.' },
     { date: '2026-10-19', title: 'Bestellmengen im Admin vom Bestand abbuchen', details: 'Die Admin-Bestellansicht fragt vor dem Abziehen der bestellten Mengen nach. Die Abbuchung läuft atomar und kann pro Bestellung nur einmal erfolgen.' },
@@ -638,7 +644,7 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
     catch (reason) { setLoadError(reason instanceof Error ? reason.message : 'Produkt konnte nicht gelöscht werden.') }
   }
   return <div className="admin-shell">
-    <header className="admin-header"><a className="brand admin-brand" href="#">Amspind<span className="brand-mark">›</span></a><div className="admin-title"><strong>Produktverwaltung</strong><span>Amspind</span></div><div className="admin-actions"><button className="text-button" onClick={onExit}>Öffentliche Seite</button><button className="logout" onClick={async () => { await request('/api/auth/logout', { method: 'POST' }); setLoggedIn(false) }}>Abmelden</button></div></header>
+    <header className="admin-header"><a className="brand admin-brand" href="#"><span className="brand-mark" aria-hidden="true">›</span>Amspind</a><div className="admin-title"><strong>Produktverwaltung</strong><span>Amspind</span></div><div className="admin-actions"><button className="text-button" onClick={onExit}>Öffentliche Seite</button><button className="logout" onClick={async () => { await request('/api/auth/logout', { method: 'POST' }); setLoggedIn(false) }}>Abmelden</button></div></header>
     <main className="admin-main">
       {orderToken ? <OrderDetails token={orderToken} /> : <>
         <div className="admin-intro"><div><p className="eyebrow">Übersicht</p><h1>Alle Produkte</h1><p className="muted">Verwalte deine Auswahl und halte sie aktuell.</p></div><button className="primary-button compact" onClick={() => setEditing('new')}>+ Produkt hinzufügen</button></div>
