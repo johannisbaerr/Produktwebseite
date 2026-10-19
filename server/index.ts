@@ -47,8 +47,13 @@ type ImageRow = { id: number; filename: string; original_name: string; sort_orde
 type ProductRow = { id: number; name: string; description: string; price_cents: number; stock: number; status: 'active' | 'unlisted'; search_terms?: string[]; created_at: string; updated_at: string; product_images?: ImageRow[]; product_categories?: { category_id: string }[] }
 type SessionRow = { admin_id: number; expires_at: string }
 const productSelect = 'id,name,description,price_cents,stock,status,search_terms,created_at,updated_at,product_images(id,filename,original_name,sort_order),product_categories(category_id)'
+const legacyProductSelect = 'id,name,description,price_cents,stock,status,created_at,updated_at,product_images(id,filename,original_name,sort_order)'
 const imagePayload = (image: ImageRow) => ({ id: image.id, url: supabase.storage.from(storageBucket).getPublicUrl(image.filename).data.publicUrl, originalName: image.original_name })
 const productPayload = (row: ProductRow) => ({ id: row.id, name: row.name, description: row.description || '', priceCents: row.price_cents, stock: row.stock, status: row.stock > 0 && row.status === 'active' ? 'active' : 'unlisted', searchTerms: row.search_terms || [], categoryIds: (row.product_categories || []).map(({ category_id }) => category_id), createdAt: row.created_at, updatedAt: row.updated_at, images: (row.product_images || []).sort((a, b) => a.sort_order - b.sort_order || a.id - b.id).map(imagePayload) })
+const isMissingShopSchema = (error: { code?: string; message: string }) =>
+  ['42P01', '42703', 'PGRST200', 'PGRST204', 'PGRST205'].includes(error.code || '') ||
+  /could not find the table|could not find a relationship|column .* does not exist|relation .* does not exist/i.test(error.message)
+const shopMigrationMessage = 'Die Shop-Datenbank ist noch nicht vollständig eingerichtet. Bitte führe die SQL-Dateien in supabase/migrations/ der Reihe nach im Supabase SQL Editor aus.'
 
 const categoryDesigns = ['Kachel', 'Panorama', 'Kompakt'] as const
 const categoryPayload = (row: { id: string; name: string; sort_order: number; design: string; preview_mode: 'products' | 'upload'; preview_image: string | null }, productIds: string[]) => ({
@@ -75,9 +80,15 @@ const auth = async (req: express.Request, res: express.Response, next: express.N
 
 app.get('/api/categories', async (_req, res) => {
   const { data: categories, error } = await supabase.from('categories').select('id,name,sort_order,design,preview_mode,preview_image').order('sort_order', { ascending: true })
-  if (error) return res.status(500).json({ error: 'Kategorien konnten nicht geladen werden.' })
+  if (error) {
+    console.error('Category query failed:', error.code, error.message)
+    return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: isMissingShopSchema(error) ? shopMigrationMessage : 'Kategorien konnten nicht geladen werden.' })
+  }
   const { data: memberships, error: membershipError } = await supabase.from('product_categories').select('category_id,product_id')
-  if (membershipError) return res.status(500).json({ error: 'Kategoriezuordnungen konnten nicht geladen werden.' })
+  if (membershipError) {
+    console.error('Category membership query failed:', membershipError.code, membershipError.message)
+    return res.status(isMissingShopSchema(membershipError) ? 503 : 500).json({ error: isMissingShopSchema(membershipError) ? shopMigrationMessage : 'Kategoriezuordnungen konnten nicht geladen werden.' })
+  }
   res.json((categories || []).map((category) => categoryPayload(
     category,
     (memberships || []).filter((membership) => membership.category_id === category.id).map((membership) => membership.product_id),
@@ -85,8 +96,17 @@ app.get('/api/categories', async (_req, res) => {
 })
 
 app.get('/api/products', async (_req, res) => {
-  const { data, error } = await supabase.from('products').select(productSelect).eq('status', 'active').gt('stock', 0).order('updated_at', { ascending: false })
-  if (error) return res.status(500).json({ error: 'Produkte konnten nicht geladen werden.' })
+  let { data, error } = await supabase.from('products').select(productSelect).eq('status', 'active').gt('stock', 0).order('updated_at', { ascending: false })
+  if (error && isMissingShopSchema(error)) {
+    console.error('Product query requires the shop migration; using the legacy product fields:', error.code, error.message)
+    const legacyResult = await supabase.from('products').select(legacyProductSelect).eq('status', 'active').gt('stock', 0).order('updated_at', { ascending: false })
+    data = legacyResult.data
+    error = legacyResult.error
+  }
+  if (error) {
+    console.error('Product query failed:', error.code, error.message)
+    return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: isMissingShopSchema(error) ? shopMigrationMessage : 'Produkte konnten nicht geladen werden.' })
+  }
   res.json((data as ProductRow[]).map(productPayload))
 })
 
@@ -141,9 +161,15 @@ app.post('/api/admin/orders/:token/fulfill', auth, async (req, res) => {
 
 app.get('/api/admin/categories', auth, async (_req, res) => {
   const { data: categories, error } = await supabase.from('categories').select('id,name,sort_order,design,preview_mode,preview_image').order('sort_order', { ascending: true })
-  if (error) return res.status(500).json({ error: 'Kategorien konnten nicht geladen werden.' })
+  if (error) {
+    console.error('Admin category query failed:', error.code, error.message)
+    return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: isMissingShopSchema(error) ? shopMigrationMessage : 'Kategorien konnten nicht geladen werden.' })
+  }
   const { data: memberships, error: membershipError } = await supabase.from('product_categories').select('category_id,product_id')
-  if (membershipError) return res.status(500).json({ error: 'Kategoriezuordnungen konnten nicht geladen werden.' })
+  if (membershipError) {
+    console.error('Admin category membership query failed:', membershipError.code, membershipError.message)
+    return res.status(isMissingShopSchema(membershipError) ? 503 : 500).json({ error: isMissingShopSchema(membershipError) ? shopMigrationMessage : 'Kategoriezuordnungen konnten nicht geladen werden.' })
+  }
   res.json((categories || []).map((category) => categoryPayload(
     category,
     (memberships || []).filter((membership) => membership.category_id === category.id).map((membership) => membership.product_id),
@@ -256,8 +282,19 @@ app.get('/api/admin/products', auth, async (req, res) => {
   const search = String(req.query.search || '').trim()
   let query = supabase.from('products').select(productSelect).order('updated_at', { ascending: false }).order('id', { ascending: true })
   if (search) query = query.ilike('name', `%${search}%`)
-  const { data, error } = await query
-  if (error) return res.status(500).json({ error: 'Produkte konnten nicht geladen werden.' })
+  let { data, error } = await query
+  if (error && isMissingShopSchema(error)) {
+    console.error('Admin product query requires the shop migration; using the legacy product fields:', error.code, error.message)
+    let legacyQuery = supabase.from('products').select(legacyProductSelect).order('updated_at', { ascending: false }).order('id', { ascending: true })
+    if (search) legacyQuery = legacyQuery.ilike('name', `%${search}%`)
+    const legacyResult = await legacyQuery
+    data = legacyResult.data
+    error = legacyResult.error
+  }
+  if (error) {
+    console.error('Admin product query failed:', error.code, error.message)
+    return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: isMissingShopSchema(error) ? shopMigrationMessage : 'Produkte konnten nicht geladen werden.' })
+  }
   res.json((data as ProductRow[]).map(productPayload))
 })
 

@@ -166,11 +166,38 @@ function CategoryPreview({ category, products }: { category: Category; products:
   </div>
 }
 
+function StorefrontHeader({ cartCount, search, onSearchChange, onSearch, onCart, onAdmin }: {
+  cartCount: number
+  search: string
+  onSearchChange: (value: string) => void
+  onSearch: () => void
+  onCart: () => void
+  onAdmin: () => void
+}) {
+  return <header className="site-header">
+    <a className="brand" href="/">Amspind<span className="brand-mark">›</span></a>
+    <form className="shop-search" onSubmit={(event) => { event.preventDefault(); onSearch() }}>
+      <input aria-label="Produkte suchen" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Wonach suchst du?" />
+      <button aria-label="Suchen">⌕</button>
+    </form>
+    <nav>
+      <button className="cart-button" onClick={onCart} aria-label={`Warenkorb, ${cartCount} Artikel`}>
+        <span className="cart-icon-wrap"><svg className="cart-icon" viewBox="0 0 32 30" aria-hidden="true"><path d="M2 3h4l3.2 16.1a3 3 0 0 0 3 2.4h12.5a3 3 0 0 0 2.9-2.2L30 9H8" /><circle cx="13" cy="26" r="1.8" /><circle cx="24" cy="26" r="1.8" /></svg><span className="cart-count">{cartCount}</span></span>
+        <span className="cart-label">Warenkorb</span>
+      </button>
+      <button className="admin-link profile-link" onClick={onAdmin} aria-label="Admin-Anmeldung" title="Admin-Anmeldung">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M4.8 20c.7-3.4 3.3-5.2 7.2-5.2s6.5 1.8 7.2 5.2" /></svg>
+      </button>
+    </nav>
+  </header>
+}
+
 function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const [products, setProducts] = useState<Product[]>(readPublicProductsCache)
   const [categories, setCategories] = useState<Category[]>([allProductsCategory])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [categoryError, setCategoryError] = useState('')
   const [search, setSearch] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('')
   const [cart, setCart] = useState<CartItem[]>(readCart)
@@ -178,7 +205,6 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const [clearCartPrompt, setClearCartPrompt] = useState(false)
   const [shareLink, setShareLink] = useState('')
   const [cartError, setCartError] = useState('')
-  const hasCatalogRef = useRef(false)
   const categoryCardsRef = useRef<HTMLDivElement>(null)
   const sortedCategories = useMemo(() => [allProductsCategory, ...categories.filter((category) => category.id !== 'all-products').sort((a, b) => a.sortOrder - b.sortOrder)], [categories])
   const displayCategories = sortedCategories
@@ -220,18 +246,22 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
     const loadProducts = () => {
       if (loadingProducts || document.visibilityState === 'hidden') return
       loadingProducts = true
-      Promise.all([request<Product[]>('/api/products'), request<Category[]>('/api/categories')])
-        .then(([nextProducts, nextCategories]) => {
-          cachePublicProducts(nextProducts)
-          if (mounted) {
-            setProducts(nextProducts)
-            setCategories(nextCategories)
-            hasCatalogRef.current = true
+      Promise.allSettled([request<Product[]>('/api/products'), request<Category[]>('/api/categories')])
+        .then(([productsResult, categoriesResult]) => {
+          if (!mounted) return
+          if (productsResult.status === 'fulfilled') {
+            cachePublicProducts(productsResult.value)
+            setProducts(productsResult.value)
             setLoadError('')
+          } else {
+            setLoadError(productsResult.reason instanceof Error ? productsResult.reason.message : 'Produkte konnten gerade nicht geladen werden.')
           }
-        })
-        .catch(() => {
-          if (mounted && !hasCatalogRef.current) setLoadError('Produkte oder Kategorien konnten gerade nicht geladen werden. Bitte versuche es erneut.')
+          if (categoriesResult.status === 'fulfilled') {
+            setCategories(categoriesResult.value)
+            setCategoryError('')
+          } else {
+            setCategoryError(categoriesResult.reason instanceof Error ? categoriesResult.reason.message : 'Kategorien konnten gerade nicht geladen werden.')
+          }
         })
         .finally(() => {
           loadingProducts = false
@@ -309,23 +339,25 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
     }
   }
 
+  const cartHeader = <StorefrontHeader
+    cartCount={cartCount}
+    search={search}
+    onSearchChange={setSearch}
+    onSearch={() => { setSelectedCategory('all-products'); setCartOpen(false) }}
+    onCart={() => setCartOpen(true)}
+    onAdmin={() => { setCartOpen(false); onAdmin() }}
+  />
   return <div className="public-shell">
-    <header className="site-header"><a className="brand" href="/">Amspind<span className="brand-mark">›</span></a>
-      <form className="shop-search" onSubmit={(event) => { event.preventDefault(); setSelectedCategory('all-products') }}><input aria-label="Produkte suchen" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Wonach suchst du?" /><button aria-label="Suchen">⌕</button></form>
-      <nav><button className="cart-button" onClick={() => setCartOpen(true)} aria-label={`Warenkorb, ${cartCount} Artikel`}>
-        <span className="cart-icon-wrap"><svg className="cart-icon" viewBox="0 0 32 30" aria-hidden="true"><path d="M2 3h4l3.2 16.1a3 3 0 0 0 3 2.4h12.5a3 3 0 0 0 2.9-2.2L30 9H8" /><circle cx="13" cy="26" r="1.8" /><circle cx="24" cy="26" r="1.8" /></svg><span className="cart-count">{cartCount}</span></span>
-        <span className="cart-label">Warenkorb</span>
-      </button><button className="admin-link" onClick={onAdmin}>Admin-Anmeldung <span>↗</span></button></nav>
-    </header>
+    {!cartOpen && cartHeader}
     <main className="shop-main">
       <section className="category-navigation" aria-label="Entdecke Kategorien">
-        {loading ? <div className="loading">Kategorien werden geladen ...</div> : loadError && !hasCatalogRef.current ? <div className="loading" role="alert">{loadError}</div> : displayCategories.length ? <><div className="category-track-controls">{displayCategories.length > 3 && <div className="promo-arrows"><button aria-label="Kategorien nach links" onClick={() => categoryCardsRef.current?.scrollBy({ left: -380, behavior: 'smooth' })}>‹</button><button aria-label="Kategorien nach rechts" onClick={() => categoryCardsRef.current?.scrollBy({ left: 380, behavior: 'smooth' })}>›</button></div>}</div><div className="category-promo-track" ref={categoryCardsRef}>{displayCategories.map((category) => {
+        {loading ? <div className="loading">Kategorien werden geladen ...</div> : <>{loadError && <div className="loading" role="alert">{loadError}</div>}{categoryError && <div className="loading" role="alert">{categoryError}</div>}{displayCategories.length ? <><div className="category-track-controls">{displayCategories.length > 3 && <div className="promo-arrows"><button aria-label="Kategorien nach links" onClick={() => categoryCardsRef.current?.scrollBy({ left: -380, behavior: 'smooth' })}>‹</button><button aria-label="Kategorien nach rechts" onClick={() => categoryCardsRef.current?.scrollBy({ left: 380, behavior: 'smooth' })}>›</button></div>}</div><div className="category-promo-track" ref={categoryCardsRef}>{displayCategories.map((category) => {
           const categoryProducts = category.id === 'all-products' ? products : products.filter((product) => category.productIds.includes(product.id))
           return <button key={category.id} className="category-promo-card" onClick={() => setSelectedCategory(category.id)}>
             <CategoryPreview category={category} products={categoryProducts} />
             <div className="category-promo-copy"><span className="category-promo-kicker">Amspind Auswahl</span><h2>{category.name}</h2><p>{categoryProducts.length} {categoryProducts.length === 1 ? 'Produkt' : 'Produkte'} für deine Pause</p><span className="category-promo-link">Jetzt entdecken <span aria-hidden="true">→</span></span></div>
           </button>
-        })}</div></> : <div className="category-empty"><strong>Deine Auswahl wird vorbereitet</strong><span>Bald findest du hier die Kategorien aus dem Spind.</span></div>}
+        })}</div></> : <div className="category-empty"><strong>Deine Auswahl wird vorbereitet</strong><span>Bald findest du hier die Kategorien aus dem Spind.</span></div>}</>}
       </section>
       {(selectedCategory || search) && <section className="collection" id="collection"><div className="section-heading"><div><p className="eyebrow">{search ? 'Suchergebnisse' : 'Die aktuelle Auswahl'}</p><h2>{sortedCategories.find((category) => category.id === selectedCategory)?.name || 'Alle Produkte'}</h2></div><button className="back-to-categories" onClick={() => { setSelectedCategory(''); setSearch(''); setCartError(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>← Kategorien</button><span className="product-total">{visibleProducts.length.toString().padStart(2, '0')} Artikel</span></div>
         {loading ? <div className="loading">Produkte werden geladen ...</div> : loadError ? <div className="loading" role="alert">{loadError}</div> : visibleProducts.length === 0 ? <div className="empty-public"><span>○</span><h3>{search ? 'Keine passenden Produkte gefunden' : 'Demnächst hier'}</h3><p>{search ? 'Versuche einen anderen Suchbegriff.' : 'Diese Auswahl wird gerade vorbereitet.'}</p></div> : <div className="product-grid">{visibleProducts.map((product, index) => <article className="product-card" key={product.id} style={{ animationDelay: `${Math.min(index * 35, 105)}ms` }}>
@@ -335,7 +367,8 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       </section>}
     </main>
     <footer><span>Amspind <small>Dein Spind, deine Auswahl.</small></span><span>© {new Date().getFullYear()}</span></footer>
-    {cartOpen && <div className="cart-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false) }}><section className="cart-panel" role="dialog" aria-modal="true" aria-labelledby="cart-title"><header className="cart-panel-header"><a className="brand" href="/" onClick={(event) => { event.preventDefault(); setCartOpen(false) }}>Amspind<span className="brand-mark">›</span></a><div className="cart-panel-heading"><p className="eyebrow">Deine Auswahl</p><h2 id="cart-title">Warenkorb <span>({cartCount} Artikel)</span></h2></div><button className="icon-button" onClick={() => setCartOpen(false)} aria-label="Warenkorb schließen">×</button></header>
+    {cartOpen && <div className="cart-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false) }}>{cartHeader}<section className="cart-panel" role="dialog" aria-modal="true" aria-labelledby="cart-title">
+      <div className="cart-page-title"><p className="eyebrow">Deine Auswahl</p><h2 id="cart-title">Warenkorb <span>({cartCount} Artikel)</span></h2></div>
       <div className="cart-page-content">
       <div className="cart-page-items">
       {cart.length === 0 ? <p className="muted">Dein Warenkorb ist noch leer.</p> : <div className="cart-items">{cart.map((item) => {
@@ -487,6 +520,7 @@ function CategoryManager({ products }: { products: Product[] }) {
 function ChangeNotes() {
   const [open, setOpen] = useState(false)
   const entries = [
+    { date: '2026-10-19', title: 'Ladefehler und Kopfzeilen behoben', details: 'Produkte und Kategorien laden unabhängig voneinander. Vorhandene Produkte bleiben bei fehlender Shop-Migration sichtbar, und Datenbankfehler nennen jetzt den nötigen Einrichtungsschritt. Der Warenkorb nutzt dieselbe Kopfzeile wie die Startseite; der Admin-Zugang ist ein zugängliches Profilsymbol.' },
     { date: '2026-10-19', title: 'Warenkorb auf Vollbild umgestellt', details: 'Der Warenkorb öffnet jetzt als vollständige, bildschirmfüllende Ansicht mit Produktliste und separater Zwischensumme. Die Artikelanzahl sitzt direkt über dem Warenkorb-Symbol.' },
     { date: '2026-10-19', title: 'Bestellmengen im Admin vom Bestand abbuchen', details: 'Die Admin-Bestellansicht fragt vor dem Abziehen der bestellten Mengen nach. Die Abbuchung läuft atomar und kann pro Bestellung nur einmal erfolgen.' },
     { date: '2026-10-19', title: 'Alle Produkte als Kategorie-Karte', details: 'Die kleine Kategorie-Leiste unter der Suche entfernt. „Alle Produkte“ ist jetzt eine große Karte in der Kategorie-Reihe und zeigt ebenfalls wechselnde, per Wischgeste bedienbare Produktbilder.' },
@@ -615,7 +649,7 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={({ active }) => setDraggingProductId(Number(active.id))} onDragCancel={() => setDraggingProductId(null)} onDragEnd={(event) => { void saveProductOrder(event) }}>
             <SortableContext items={products.map((product) => product.id)} strategy={verticalListSortingStrategy}><div className="admin-list">
               {products.map((product) => <SortableProduct key={product.id} product={product} disabled={Boolean(search)} onEdit={() => setEditing(product)} onDelete={() => { void deleteProduct(product) }} />)}
-              {products.length === 0 && <div className="admin-empty">Keine Produkte gefunden.</div>}
+              {products.length === 0 && !loadError && <div className="admin-empty">{search ? 'Keine Produkte für diese Suche gefunden.' : 'Noch keine Produkte vorhanden.'}</div>}
             </div></SortableContext>
             <DragOverlay>{activeProduct && <article className="admin-product admin-product-overlay"><div className="drag-handle" aria-hidden="true">⠿</div><div className="admin-thumb">{activeProduct.images[0] && <img src={activeProduct.images[0].url} alt="" />}</div><div className="admin-product-main"><div className="admin-product-title"><h3>{activeProduct.name}</h3><span className={`status ${activeProduct.status}`}>{activeProduct.status === 'active' && activeProduct.stock > 0 ? 'Aktiv' : 'Nicht gelistet'}</span></div><p>{activeProduct.description}</p><span className="admin-meta">{currency.format(activeProduct.priceCents / 100)} · {activeProduct.stock} auf Lager · {activeProduct.images.length} Bilder</span></div></article>}</DragOverlay>
           </DndContext>

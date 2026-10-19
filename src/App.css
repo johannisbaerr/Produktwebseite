@@ -39,6 +39,8 @@ button, input, textarea, select { font: inherit; }
 .public-shell .site-header .admin-link { background: transparent; color: #fff; border-color: rgba(255,255,255,.38); }
 .public-shell .site-header .admin-link:hover { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.7); }
 .public-shell .site-header .admin-link span { color: var(--accent); }
+.public-shell .site-header .profile-link { display: grid; place-items: center; width: 42px; height: 42px; padding: 8px; border-radius: 50%; }
+.public-shell .site-header .profile-link svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .brand { font-weight: 700; font-size: 25px; letter-spacing: -.08em; color: var(--ink); text-decoration: none; }
 .brand-mark { display: inline-block; color: var(--accent); font-size: 34px; line-height: 0; font-weight: 500; transform: rotate(180deg); vertical-align: -2px; margin-left: 2px; }
 .brand span { color: var(--blue-strong); }
@@ -256,12 +258,10 @@ textarea { resize: vertical; min-height: 110px; }
 .cart-panel, .confirm-dialog { width: min(560px, 100%); max-height: 90vh; overflow: auto; padding: 24px; background: #fff; border-radius: 18px; box-shadow: var(--shadow); }
 .cart-backdrop { position: fixed; z-index: 20; inset: 0; display: block; overflow: auto; background: #f2f4f5; }
 .cart-panel { width: 100%; min-height: 100vh; max-height: none; overflow: visible; padding: 0; border-radius: 0; box-shadow: none; }
-.cart-panel-header { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: clamp(18px, 5vw, 72px); min-height: 86px; padding: 12px max(4vw, calc((100vw - 1320px) / 2)); border-bottom: 1px solid var(--line); background: #fff; }
-.cart-panel-header .brand { white-space: nowrap; }
-.cart-panel-heading .eyebrow { margin-bottom: 4px; }
-.cart-panel-heading h2 { margin: 0; font-size: 22px; color: var(--ink); }
-.cart-panel-heading h2 span { color: var(--muted); font-size: 15px; font-weight: 400; }
-.cart-panel-header .icon-button { width: 42px; height: 42px; font-size: 28px; }
+.cart-page-title { max-width: 1320px; margin: 0 auto; padding: 24px max(4vw, 20px) 0; }
+.cart-page-title .eyebrow { margin-bottom: 4px; }
+.cart-page-title h2 { margin: 0; color: var(--ink); font-size: 26px; }
+.cart-page-title h2 span { color: var(--muted); font-size: 16px; font-weight: 400; }
 .cart-page-content { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); gap: 28px; max-width: 1320px; margin: 0 auto; padding: 32px max(4vw, 20px) 64px; align-items: start; }
 .cart-page-items, .cart-summary { padding: 24px; border: 1px solid #e1e6e9; border-radius: 12px; background: #fff; }
 .cart-page-items { min-height: 220px; }
@@ -357,11 +357,9 @@ textarea { resize: vertical; min-height: 110px; }
   .admin-link { padding: 9px; font-size: 10px; }
   .cart-button { font-size: 11px; }
   .cart-page-content { grid-template-columns: 1fr; gap: 14px; padding: 14px 12px 32px; }
-  .cart-panel-header { min-height: 72px; gap: 12px; padding: 10px 14px; }
-  .cart-panel-header .brand { font-size: 21px; }
-  .cart-panel-heading h2 { font-size: 17px; }
-  .cart-panel-heading h2 span { font-size: 12px; }
-  .cart-panel-header .icon-button { width: 36px; height: 36px; }
+  .cart-page-title { padding: 18px 14px 0; }
+  .cart-page-title h2 { font-size: 21px; }
+  .cart-page-title h2 span { font-size: 13px; }
   .cart-page-items, .cart-summary { padding: 16px; }
   .cart-page-items .cart-page-item { grid-template-columns: 76px minmax(0, 1fr); gap: 12px; padding: 16px 0; }
   .cart-product-image { width: 76px; height: 76px; }
@@ -377,6 +375,7 @@ textarea { resize: vertical; min-height: 110px; }
   .public-shell .site-header .brand { font-size: 23px; }
   .public-shell .site-header nav { gap: 10px; }
   .public-shell .site-header .cart-button { min-width: 64px; }
+  .public-shell .site-header .profile-link { width: 38px; height: 38px; padding: 7px; }
   .cart-icon-wrap { width: 34px; }
   .shop-search { order: 3; flex: 1 0 100%; max-width: none; }
   .category-navigation { margin-top: 8px; padding: 0 14px; }
