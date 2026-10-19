@@ -197,7 +197,6 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const [categories, setCategories] = useState<Category[]>([allProductsCategory])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
-  const [categoryError, setCategoryError] = useState('')
   const [search, setSearch] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('')
   const [cart, setCart] = useState<CartItem[]>(readCart)
@@ -216,6 +215,26 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   }), [products, search, selectedCategory, sortedCategories])
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0)
   const cartTotal = cart.reduce((total, item) => total + item.quantity * (products.find((product) => product.id === item.productId)?.priceCents || 0), 0)
+  const isCartHistoryEntry = () => isRecord(window.history.state) && window.history.state.amspindCart === true
+  const openCart = () => {
+    if (!isCartHistoryEntry()) window.history.pushState({ ...(isRecord(window.history.state) ? window.history.state : {}), amspindCart: true }, '', window.location.href)
+    setCartOpen(true)
+  }
+  const closeCart = () => {
+    if (isCartHistoryEntry()) window.history.back()
+    else setCartOpen(false)
+  }
+  const openAdminFromCart = () => {
+    if (isCartHistoryEntry()) window.history.replaceState({ ...(isRecord(window.history.state) ? window.history.state : {}), amspindCart: false }, '', window.location.href)
+    setCartOpen(false)
+    onAdmin()
+  }
+
+  useEffect(() => {
+    const syncCartWithHistory = () => setCartOpen(isCartHistoryEntry())
+    window.addEventListener('popstate', syncCartWithHistory)
+    return () => window.removeEventListener('popstate', syncCartWithHistory)
+  }, [])
 
   useEffect(() => {
     if (selectedCategory) document.getElementById('collection')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -225,7 +244,10 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
     if (!cartOpen) return
     const previousOverflow = document.body.style.overflow
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setCartOpen(false)
+      if (event.key === 'Escape') {
+        if (isCartHistoryEntry()) window.history.back()
+        else setCartOpen(false)
+      }
     }
     document.body.style.overflow = 'hidden'
     window.addEventListener('keydown', closeOnEscape)
@@ -259,9 +281,6 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
           }
           if (categoriesResult.status === 'fulfilled') {
             setCategories(categoriesResult.value)
-            setCategoryError('')
-          } else {
-            setCategoryError(categoriesResult.reason instanceof Error ? categoriesResult.reason.message : 'Kategorien konnten gerade nicht geladen werden.')
           }
         })
         .finally(() => {
@@ -344,15 +363,15 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
     cartCount={cartCount}
     search={search}
     onSearchChange={setSearch}
-    onSearch={() => { setSelectedCategory('all-products'); setCartOpen(false) }}
-    onCart={() => setCartOpen(true)}
-    onAdmin={() => { setCartOpen(false); onAdmin() }}
+    onSearch={() => { setSelectedCategory('all-products'); closeCart() }}
+    onCart={() => { if (cartOpen) closeCart(); else openCart() }}
+    onAdmin={openAdminFromCart}
   />
   return <div className="public-shell">
     {!cartOpen && cartHeader}
     <main className="shop-main">
       {!isFullCatalog && <section className="category-navigation" aria-label="Entdecke Kategorien">
-        {loading ? <div className="loading">Kategorien werden geladen ...</div> : <>{loadError && <div className="loading" role="alert">{loadError}</div>}{categoryError && <div className="loading" role="alert">{categoryError}</div>}{displayCategories.length ? <><div className="category-track-controls">{displayCategories.length > 3 && <div className="promo-arrows"><button aria-label="Kategorien nach links" onClick={() => categoryCardsRef.current?.scrollBy({ left: -380, behavior: 'smooth' })}>‹</button><button aria-label="Kategorien nach rechts" onClick={() => categoryCardsRef.current?.scrollBy({ left: 380, behavior: 'smooth' })}>›</button></div>}</div><div className="category-promo-track" ref={categoryCardsRef}>{displayCategories.map((category) => {
+        {loading ? <div className="loading">Kategorien werden geladen ...</div> : <>{loadError && <div className="loading" role="alert">{loadError}</div>}{displayCategories.length ? <><div className="category-track-controls">{displayCategories.length > 3 && <div className="promo-arrows"><button aria-label="Kategorien nach links" onClick={() => categoryCardsRef.current?.scrollBy({ left: -380, behavior: 'smooth' })}>‹</button><button aria-label="Kategorien nach rechts" onClick={() => categoryCardsRef.current?.scrollBy({ left: 380, behavior: 'smooth' })}>›</button></div>}</div><div className="category-promo-track" ref={categoryCardsRef}>{displayCategories.map((category) => {
           const categoryProducts = category.id === 'all-products' ? products : products.filter((product) => category.productIds.includes(product.id))
           return <button key={category.id} className={`category-promo-card ${category.id === 'all-products' ? 'all-products-category' : ''}`} onClick={() => setSelectedCategory(category.id)}>
             <CategoryPreview category={category} products={categoryProducts} />
@@ -368,7 +387,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       </section>}
     </main>
     {!isFullCatalog && <footer><span>Amspind <small>Dein Spind, deine Auswahl.</small></span><span>© {new Date().getFullYear()}</span></footer>}
-    {cartOpen && <div className="cart-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false) }}>{cartHeader}<section className="cart-panel" role="dialog" aria-modal="true" aria-labelledby="cart-title">
+    {cartOpen && <div className="cart-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCart() }}>{cartHeader}<section className="cart-panel" role="dialog" aria-modal="true" aria-labelledby="cart-title">
       <div className="cart-page-title"><p className="eyebrow">Deine Auswahl</p><h2 id="cart-title">Warenkorb <span>({cartCount} Artikel)</span></h2></div>
       <div className="cart-page-content">
       <div className="cart-page-items">
@@ -507,8 +526,8 @@ function CategoryManager({ products }: { products: Product[] }) {
     try { await request(`/api/admin/categories/${selected.id}`, { method: 'DELETE' }); setSelectedId(''); await load() }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Kategorie konnte nicht gelöscht werden.') }
   }
-  return <section className="admin-section category-manager"><div className="section-heading"><div><p className="eyebrow">Startseite gestalten</p><h2>Kategorien</h2></div><span className="admin-meta">„Alle Produkte“ ist immer sichtbar.</span></div>
-    <div className="category-admin-layout"><div className="category-admin-list"><div className="fixed-category">Alle Produkte <span>Fest</span></div>{categories.map((category, index) => <div className={`category-admin-row ${category.id === selectedId ? 'selected' : ''}`} key={category.id}><button className="category-select" onClick={() => setSelectedId(category.id)}>{category.name}</button><div><button disabled={index === 0} onClick={() => { void move(index, -1) }} aria-label="Kategorie nach oben">↑</button><button disabled={index === categories.length - 1} onClick={() => { void move(index, 1) }} aria-label="Kategorie nach unten">↓</button></div></div>)}<div className="category-create"><input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Neue Kategorie" /><button className="secondary-button" disabled={creating} onClick={() => { void create() }}>{creating ? 'Wird hinzugefügt ...' : 'Hinzufügen'}</button></div></div>
+  return <section className="admin-section category-manager">
+    <div className="category-admin-layout"><div className="category-admin-list"><div className="fixed-category">Alle Produkte <span>Fest</span></div>{categories.map((category, index) => <div className={`category-admin-row ${category.id === selectedId ? 'selected' : ''}`} key={category.id}><button className="category-select" onClick={() => setSelectedId(category.id)}>{category.name}</button><div><button disabled={index === 0} onClick={() => { void move(index, -1) }} aria-label="Kategorie nach oben">↑</button><button disabled={index === categories.length - 1} onClick={() => { void move(index, 1) }} aria-label="Kategorie nach unten">↓</button></div></div>)}<form className="category-create" onSubmit={(event) => { event.preventDefault(); void create() }}><input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Neue Kategorie" aria-label="Name der neuen Kategorie" maxLength={80} /><button className="secondary-button" type="submit" disabled={creating}>{creating ? 'Wird hinzugefügt ...' : 'Hinzufügen'}</button></form></div>
       <div className="category-editor">{selected ? <>
         <label>Kategoriename<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label>
         <label>Design<select value={design} onChange={(event) => setDesign(event.target.value)}>{categoryDesigns.map((option) => <option key={option} value={option}>{option}</option>)}</select><small>Die auswählbaren Designs werden später visuell ausgestaltet.</small></label>
@@ -522,8 +541,8 @@ function CategoryManager({ products }: { products: Product[] }) {
 }
 
 function ChangeNotes() {
-  const [open, setOpen] = useState(false)
   const entries = [
+    { date: '2026-10-19', title: 'Zurücknavigation und Admin-Bereiche verbessert', details: 'Der Handy-Zurückknopf schließt den Warenkorb und stellt die vorherige Ansicht wieder her. Die öffentliche Startseite blendet keine Kategorien-Warnung mehr ein, solange die vorhandene Kategorieansicht weiter nutzbar ist. Admin-Bereiche sind jetzt aufklappbar strukturiert.' },
     { date: '2026-10-19', title: 'Kategorien im Admin zuverlässiger anlegen', details: 'Beim Erstellen einer Kategorie werden Datenbankfehler jetzt protokolliert und fehlende Shop-Migrationen verständlich gemeldet. Nach erfolgreichem Anlegen erscheint die Kategorie direkt in der Liste.' },
     { date: '2026-10-19', title: 'Produktliste und Logo überarbeitet', details: 'Produktauflistungen sind jetzt klare, breite Zeilen mit Bild links, gut lesbaren Produktdetails und eigener Warenkorb-Schaltfläche. „Alle Produkte“ öffnet eine vollständige Ansicht statt die Liste unter den Kategorien auszuklappen. Das Logo zeigt nun den orangefarbenen Pfeil auf Dunkelblau.' },
     { date: '2026-10-19', title: 'Ladefehler und Kopfzeilen behoben', details: 'Produkte und Kategorien laden unabhängig voneinander. Vorhandene Produkte bleiben bei fehlender Shop-Migration sichtbar, und Datenbankfehler nennen jetzt den nötigen Einrichtungsschritt. Der Warenkorb nutzt dieselbe Kopfzeile wie die Startseite; der Admin-Zugang ist ein zugängliches Profilsymbol.' },
@@ -541,7 +560,7 @@ function ChangeNotes() {
     { date: '2026-09-22', title: 'Öffentlichen Produktkatalog gestaltet', details: 'Startseite, Produktkarten, Farben und Lagerbestandsanzeige überarbeitet.' },
     { date: '2026-09-22', title: 'Supabase und Produktions-API eingebunden', details: 'Dauerhafte Produkt- und Bildspeicherung mit Supabase sowie CORS- und API-Konfiguration für Hosting ergänzt.' },
   ].sort((a, b) => b.date.localeCompare(a.date))
-  return <div className="change-notes"><button className="change-notes-toggle" onClick={() => setOpen((current) => !current)}>Codeänderungen {open ? '−' : '+'}</button>{open && <section className="change-notes-panel"><h2>Änderungen am Code</h2>{entries.map((entry) => <article key={`${entry.date}-${entry.title}`}><h3>{entry.title}</h3><time dateTime={entry.date}>{new Date(`${entry.date}T12:00:00`).toLocaleDateString('de-DE')}</time><p>{entry.details}</p></article>)}</section>}</div>
+  return <details className="admin-accordion change-notes"><summary><span className="accordion-summary-copy"><strong>Codeänderungen</strong><small>Was sich an der Webseite geändert hat</small></span></summary><section className="change-notes-panel"><h2>Änderungen am Code</h2>{entries.map((entry) => <article key={`${entry.date}-${entry.title}`}><h3>{entry.title}</h3><time dateTime={entry.date}>{new Date(`${entry.date}T12:00:00`).toLocaleDateString('de-DE')}</time><p>{entry.details}</p></article>)}</section></details>
 }
 
 function OrderDetails({ token }: { token: string }) {
@@ -647,9 +666,14 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
     <header className="admin-header"><a className="brand admin-brand" href="#"><span className="brand-mark" aria-hidden="true">›</span>Amspind</a><div className="admin-title"><strong>Produktverwaltung</strong><span>Amspind</span></div><div className="admin-actions"><button className="text-button" onClick={onExit}>Öffentliche Seite</button><button className="logout" onClick={async () => { await request('/api/auth/logout', { method: 'POST' }); setLoggedIn(false) }}>Abmelden</button></div></header>
     <main className="admin-main">
       {orderToken ? <OrderDetails token={orderToken} /> : <>
-        <div className="admin-intro"><div><p className="eyebrow">Übersicht</p><h1>Alle Produkte</h1><p className="muted">Verwalte deine Auswahl und halte sie aktuell.</p></div><button className="primary-button compact" onClick={() => setEditing('new')}>+ Produkt hinzufügen</button></div>
-        <CategoryManager products={allProducts} />
-        <section className="admin-section"><div className="admin-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nach Produkt suchen ..." /></label><span>{products.length} Produkte</span></div>
+        <div className="admin-intro"><div><p className="eyebrow">Übersicht</p><h1>Verwaltung</h1><p className="muted">Produkte und Startseite an einem Ort verwalten.</p></div><button className="primary-button compact" onClick={() => setEditing('new')}>+ Produkt hinzufügen</button></div>
+        <details className="admin-accordion category-accordion">
+          <summary><span className="accordion-summary-copy"><strong>Startseite & Kategorien</strong><small>Kategorien erstellen, sortieren und Produkte zuordnen</small></span></summary>
+          <CategoryManager products={allProducts} />
+        </details>
+        <details className="admin-accordion products-accordion" open>
+          <summary><span className="accordion-summary-copy"><strong>Produkte</strong><small>{products.length} Produkte · suchen, bearbeiten und sortieren</small></span></summary>
+        <section className="admin-section product-management-panel"><div className="admin-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nach Produkt suchen ..." /></label><span>{products.length} Produkte</span></div>
           <p className="reorder-hint">{search ? 'Suche leeren, um die Artikelreihenfolge zu ändern.' : 'Artikel am Griffpunkt ziehen, um sie anzuordnen.'}</p>
           {reorderError && <div className="form-error">{reorderError}</div>}{loadError && <div className="form-error" role="alert">{loadError}</div>}
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={({ active }) => setDraggingProductId(Number(active.id))} onDragCancel={() => setDraggingProductId(null)} onDragEnd={(event) => { void saveProductOrder(event) }}>
@@ -660,9 +684,10 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
             <DragOverlay>{activeProduct && <article className="admin-product admin-product-overlay"><div className="drag-handle" aria-hidden="true">⠿</div><div className="admin-thumb">{activeProduct.images[0] && <img src={activeProduct.images[0].url} alt="" />}</div><div className="admin-product-main"><div className="admin-product-title"><h3>{activeProduct.name}</h3><span className={`status ${activeProduct.status}`}>{activeProduct.status === 'active' && activeProduct.stock > 0 ? 'Aktiv' : 'Nicht gelistet'}</span></div><p>{activeProduct.description}</p><span className="admin-meta">{currency.format(activeProduct.priceCents / 100)} · {activeProduct.stock} auf Lager · {activeProduct.images.length} Bilder</span></div></article>}</DragOverlay>
           </DndContext>
         </section>
+        </details>
+        <ChangeNotes />
       </>}
     </main>
-    <ChangeNotes />
     {editing && <div className="modal-backdrop"><div className="modal"><ProductForm product={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); void load(); void loadAllProducts() }} />{editing !== 'new' && <div className="existing-images"><p className="eyebrow">Bilder verwalten</p><Gallery product={editing} admin onDeleteImage={async (imageId) => { try { await request(`/api/admin/products/${editing.id}/images/${imageId}`, { method: 'DELETE' }); const updated = await request<Product[]>(`/api/admin/products?search=${encodeURIComponent(editing.name)}`); setEditing(updated.find((item) => item.id === editing.id) || editing); void loadAllProducts() } catch (reason) { setLoadError(reason instanceof Error ? reason.message : 'Produktbild konnte nicht gelöscht werden.') } }} /></div>}</div></div>}
   </div>
 }
