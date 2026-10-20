@@ -249,6 +249,17 @@ function StorefrontHeader({ cartCount, search, onSearchChange, onSearch, onSearc
   </header>
 }
 
+function BrandLoader({ message }: { message: string }) {
+  return <main className="brand-loader" role="status" aria-live="polite">
+    <div className="brand-loader-content">
+      <span className="brand-loader-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M10 24h23m-10-11 11 11-11 11" /></svg></span>
+      <strong>Amspind</strong>
+      <span className="brand-loader-progress" aria-hidden="true"><span /></span>
+      <span className="brand-loader-message">{message}</span>
+    </div>
+  </main>
+}
+
 function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const [products, setProducts] = useState<Product[]>(readPublicProductsCache)
   const [categories, setCategories] = useState<Category[]>([allProductsCategory])
@@ -499,10 +510,17 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
     return true
   }
 
+  const addWithoutExtras = (product: Product) => {
+    if (!addToCart(product)) return
+    setSelectedExtraIds([])
+    setCustomizingProduct(null)
+  }
+
   const changeQuantity = (productId: number, extraIds: number[], quantity: number) => {
     const lineId = cartLineKey(productId, extraIds)
     const product = products.find((item) => item.id === productId)
     if (quantity < 1) {
+      setCartError('')
       setShareLink('')
       if (removalTimers.current.has(lineId)) window.clearTimeout(removalTimers.current.get(lineId))
       setRemovingCartProductIds((current) => current.includes(lineId) ? current : [...current, lineId])
@@ -533,6 +551,10 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
 
   const createShareableOrder = async () => {
     setCartError('')
+    if (cart.length === 0) {
+      setCartError('Dein Warenkorb ist leer.')
+      return
+    }
     try {
       let link = shareLink
       if (!link) {
@@ -557,6 +579,8 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       setCartError(error instanceof Error ? error.message : 'Bestelllink konnte nicht erstellt oder geteilt werden.')
     }
   }
+
+  if (loading && products.length === 0) return <BrandLoader message="Dein Spind wird vorbereitet ..." />
 
   const cartHeader = <StorefrontHeader
     cartCount={cartCount}
@@ -588,8 +612,8 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
             const atStockLimit = quantity >= product.stock
             const defaultLineId = cartLineKey(product.id)
             if (product.customizable) return <div className="customizable-product-action">
-              <button className="add-cart-button" disabled={product.stock <= 0} onClick={() => { setSelectedExtraIds([]); setCustomizingProduct(product) }}>{product.stock > 0 ? 'Anpassen' : 'Nicht genug auf Lager'}</button>
-              {quantity > 0 && <small>Im Warenkorb: {quantity}</small>}
+              <button className="add-cart-button" disabled={atStockLimit} onClick={() => { setCartError(''); setSelectedExtraIds([]); setCustomizingProduct(product) }}>{atStockLimit ? 'Nicht genug auf Lager' : 'Anpassen'}</button>
+              {quantity > 0 && <small>Im Warenkorb: {quantity}{atStockLimit ? ' · Bestand erreicht' : ''}</small>}
             </div>
             return quantity > 0
               ? <div className={`product-cart-actions ${addedProductId === product.id ? 'just-added' : ''} ${removingCartProductIds.includes(defaultLineId) ? 'is-removing' : ''}`} aria-live="polite">
@@ -632,8 +656,8 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       </aside>
       </div>
     </section></div>}
-    {clearCartPrompt && <div className="modal-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="clear-cart-title"><h2 id="clear-cart-title">Möchtest du deinen Warenkorb leeren?</h2><div><button className="primary-button" onClick={() => { setCart([]); setShareLink(''); setClearCartPrompt(false) }}>Ja</button><button className="secondary-button" onClick={() => setClearCartPrompt(false)}>Nein</button></div></section></div>}
-    {customizingProduct && <div className="modal-backdrop customization-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCustomizingProduct(null) }}><section className="customization-dialog" role="dialog" aria-modal="true" aria-labelledby="customization-title"><button type="button" className="icon-button customization-close" aria-label="Schließen" onClick={() => setCustomizingProduct(null)}>×</button><p className="eyebrow">Deine Auswahl</p><h2 id="customization-title">{customizingProduct.name} anpassen</h2><p className="muted">Möchtest du Extras dazunehmen?</p><div className="customization-options">{(customizingProduct.extraOptions || []).map((extra) => <label className={`customization-option ${extra.stock <= 0 ? 'unavailable' : ''}`} key={extra.id}><input type="checkbox" checked={selectedExtraIds.includes(extra.id)} disabled={extra.stock <= 0} onChange={(event) => setSelectedExtraIds((current) => event.target.checked ? [...current, extra.id] : current.filter((id) => id !== extra.id))} /><span><strong>{extra.name}</strong><small>{extra.stock > 0 ? `${extra.stock} verfügbar` : 'Derzeit nicht verfügbar'}</small></span><b>{currency.format(extra.priceCents / 100)}</b></label>)}</div><div className="customization-actions"><button className="secondary-button" onClick={() => { if (addToCart(customizingProduct, [])) setCustomizingProduct(null) }}>Nein danke</button><button className="primary-button" disabled={selectedExtraIds.length === 0 || selectedExtraIds.some((id) => !(customizingProduct.extraOptions || []).some((extra) => extra.id === id && extra.stock > 0))} onClick={() => { if (addToCart(customizingProduct, selectedExtraIds)) setCustomizingProduct(null) }}>Mit Extras hinzufügen</button></div></section></div>}
+    {clearCartPrompt && <div className="modal-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="clear-cart-title"><h2 id="clear-cart-title">Möchtest du deinen Warenkorb leeren?</h2><div><button className="primary-button" onClick={() => { setCart([]); setCartError(''); setShareLink(''); setClearCartPrompt(false) }}>Ja</button><button className="secondary-button" onClick={() => setClearCartPrompt(false)}>Nein</button></div></section></div>}
+    {customizingProduct && <div className="modal-backdrop customization-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCustomizingProduct(null) }}><section className="customization-dialog" role="dialog" aria-modal="true" aria-labelledby="customization-title"><button type="button" className="icon-button customization-close" aria-label="Schließen" onClick={() => setCustomizingProduct(null)}>×</button><p className="eyebrow">Deine Auswahl</p><h2 id="customization-title">{customizingProduct.name} anpassen</h2><p className="muted">Möchtest du Extras dazunehmen?</p><div className="customization-options">{(customizingProduct.extraOptions || []).map((extra) => <label className={`customization-option ${extra.stock <= 0 ? 'unavailable' : ''}`} key={extra.id}><input type="checkbox" checked={selectedExtraIds.includes(extra.id)} disabled={extra.stock <= 0} onChange={(event) => setSelectedExtraIds((current) => event.target.checked ? [...current, extra.id] : current.filter((id) => id !== extra.id))} /><span><strong>{extra.name}</strong><small>{extra.stock > 0 ? `${extra.stock} verfügbar` : 'Derzeit nicht verfügbar'}</small></span><b>{currency.format(extra.priceCents / 100)}</b></label>)}</div><div className="customization-actions"><button className="secondary-button" onClick={() => addWithoutExtras(customizingProduct)}>Nein danke</button><button className="primary-button" disabled={selectedExtraIds.length === 0 || selectedExtraIds.some((id) => !(customizingProduct.extraOptions || []).some((extra) => extra.id === id && extra.stock > 0))} onClick={() => { if (addToCart(customizingProduct, selectedExtraIds)) setCustomizingProduct(null) }}>Mit Extras hinzufügen</button></div></section></div>}
   </div>
 }
 
@@ -1052,7 +1076,7 @@ function OrderDetails({ token }: { token: string }) {
     }
   }
   if (error && !order) return <div className="admin-empty" role="alert">{error}</div>
-  if (!order) return <div className="admin-loading">Bestellung wird geladen ...</div>
+  if (!order) return <BrandLoader message="Bestellung wird geladen ..." />
   return <section className="order-details"><p className="eyebrow">Geteilte Bestellung</p><h1>Bestellung ansehen</h1><p className="muted">{new Date(order.createdAt).toLocaleString('de-DE')}</p>{order.items.map((item, index) => { const unitPrice = item.priceCents + (item.extras || []).reduce((sum, extra) => sum + extra.priceCents, 0); return <div className="cart-item" key={`${item.productId}:${index}`}><div><strong>{item.name}</strong>{(item.extras || []).map((extra) => <small key={extra.id}>+ {extra.name} · {currency.format(extra.priceCents / 100)}</small>)}</div><span>{item.quantity} × {currency.format(unitPrice / 100)}</span><strong>{currency.format(item.quantity * unitPrice / 100)}</strong></div> })}<div className="cart-total"><strong>Gesamt</strong><strong>{currency.format(order.items.reduce((total, item) => total + item.quantity * (item.priceCents + (item.extras || []).reduce((sum, extra) => sum + extra.priceCents, 0)), 0) / 100)}</strong></div>
     {order.fulfilledAt
       ? <p className="order-stock-status" role="status">Bestand wurde am {new Date(order.fulfilledAt).toLocaleString('de-DE')} abgezogen.</p>
@@ -1103,7 +1127,7 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
       .then(setExtras)
       .catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Extras konnten nicht geladen werden.'))
   }, [loggedIn])
-  if (loggedIn === null) return <div className="admin-loading">Lade ...</div>
+  if (loggedIn === null) return <BrandLoader message="Verwaltung wird geladen ..." />
   if (!loggedIn) return <div className="login-page"><button className="back-link" onClick={onExit}>← Zur öffentlichen Seite</button><div className="login-box"><span className="login-symbol">Amspind</span><p className="eyebrow">Produktverwaltung</p><h1>Admin-Anmeldung</h1><p className="login-intro">{orderToken ? 'Diese Bestellung ist nur nach Admin-Anmeldung sichtbar.' : 'Melde dich an, um Produkte und Kategorien zu verwalten.'}</p><form onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); try { await request('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: form.get('username'), password: form.get('password') }) }); setLoggedIn(true) } catch (e) { setLoginError(e instanceof Error ? e.message : 'Login fehlgeschlagen.') } }}><label>Benutzername<input name="username" required defaultValue="admin" /></label><label className="password-field">Passwort<div className="password-input-wrap"><input name="password" type={showPassword ? 'text' : 'password'} required /><button type="button" className="password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Passwort verbergen' : 'Passwort anzeigen'}>{showPassword ? '🙈' : '👁'}</button></div></label>{loginError && <div className="form-error">{loginError}</div>}<button className="primary-button">Anmelden <span>↗</span></button></form><p className="login-note">Nur für den internen Gebrauch.</p></div></div>
   const deleteProduct = async (product: Product) => {
     if (!window.confirm(`„${product.name}“ wirklich endgültig löschen? Dieser Vorgang kann nicht rückgängig gemacht werden.`)) return
