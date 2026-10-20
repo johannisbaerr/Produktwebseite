@@ -683,6 +683,7 @@ function ProductForm({ product, extras, onSaved, onCancel, onRefreshBackground, 
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [processingStatus, setProcessingStatus] = useState('')
+  const [removeBackgroundOnUpload, setRemoveBackgroundOnUpload] = useState(false)
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
@@ -705,10 +706,15 @@ function ProductForm({ product, extras, onSaved, onCancel, onRefreshBackground, 
       if (files) {
         const selectedFiles = Array.from(files)
         for (const [index, file] of selectedFiles.entries()) {
-          setProcessingStatus(`Hintergrund entfernen (${index + 1}/${selectedFiles.length}) ...`)
-          const processedFile = await removeImageBackground(file)
+          let shopFile = file
+          if (removeBackgroundOnUpload) {
+            setProcessingStatus(`Hintergrund entfernen (${index + 1}/${selectedFiles.length}) ...`)
+            shopFile = await removeImageBackground(file)
+          }
           data.append('originalImages', file, `amspind-original-${file.name}`)
-          data.append('images', new File([processedFile], `amspind-freigestellt-${processedFile.name}`, { type: processedFile.type, lastModified: processedFile.lastModified }))
+          data.append('images', removeBackgroundOnUpload
+            ? new File([shopFile], `amspind-freigestellt-${file.name.replace(/\.[^.]+$/, '')}.webp`, { type: shopFile.type, lastModified: file.lastModified })
+            : file)
         }
       }
       setProcessingStatus('Produkt wird gespeichert ...')
@@ -726,7 +732,8 @@ function ProductForm({ product, extras, onSaved, onCancel, onRefreshBackground, 
     <div className="form-row"><label>Preis in EUR<input required inputMode="decimal" min="0" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="0,00" /></label><label>Lagerbestand<input required type="number" min="0" step="1" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} placeholder="0" /></label></div>
     <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as 'active' | 'unlisted' })}><option value="active">Aktiv gelistet</option><option value="unlisted">Nicht gelistet</option></select></label>
     <section className="product-customization-settings"><label className="toggle-option"><input type="checkbox" checked={form.customizable} onChange={(event) => setForm((current) => ({ ...current, customizable: event.target.checked }))} /><span><strong>Anpassungen anbieten</strong><small>Besucher können vor dem Hinzufügen Extras auswählen.</small></span></label>{form.customizable && <fieldset className="product-extra-picker"><legend>Wählbare Extras</legend>{extras.length ? extras.map((extra) => <label className={`product-choice ${extra.stock <= 0 ? 'extra-out-of-stock' : ''}`} key={extra.id}><input type="checkbox" checked={selectedExtraIds.includes(extra.id)} onChange={(event) => setSelectedExtraIds((current) => event.target.checked ? [...current, extra.id] : current.filter((id) => id !== extra.id))} /><span>{extra.name} <small>· {currency.format(extra.priceCents / 100)} · {extra.stock} auf Lager</small></span></label>) : <p className="muted">Lege zuerst im Admin-Bereich unter „Extras“ mindestens ein Extra an.</p>}</fieldset>}</section>
-    <label className="file-drop">Produktbilder{product && <small>Bestehende Bilder bleiben erhalten. Neue Dateien werden ergänzt.</small>}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required={!product} onChange={(e) => setFiles(e.target.files)} /><span>{files?.length ? `${files.length} Bild(er) ausgewählt` : 'Bilder auswählen oder hierher ziehen'}</span><small className="background-removal-note">Das Original bleibt dauerhaft erhalten; die Freistellung wird als Shop-Bild gespeichert. Beim ersten Mal wird das KI-Modell (ca. 46 MB) geladen.</small></label>
+    <label className="file-drop">Produktbilder{product && <small>Bestehende Bilder bleiben erhalten. Neue Dateien werden ergänzt.</small>}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required={!product} onChange={(e) => setFiles(e.target.files)} /><span>{files?.length ? `${files.length} Bild(er) ausgewählt` : 'Bilder auswählen oder hierher ziehen'}</span><small>Die Originaldateien werden immer gespeichert, damit du sie später erneut verwenden kannst.</small></label>
+    {files?.length ? <section className="product-customization-settings"><label className="toggle-option"><input type="checkbox" checked={removeBackgroundOnUpload} onChange={(event) => setRemoveBackgroundOnUpload(event.target.checked)} disabled={saving} /><span><strong>Bilder beim Speichern freistellen</strong><small>Ausgeschaltet bleiben die Bilder unverändert. Beim Freistellen wird das Original sicher aufbewahrt; das KI-Modell (ca. 46 MB) wird beim ersten Mal geladen.</small></span></label></section> : null}
     {product && onRefreshBackground && <button type="button" className="secondary-button" disabled={saving || backgroundBusy} onClick={() => { void onRefreshBackground(product) }}>{backgroundBusy ? 'Freistellung wird aktualisiert ...' : 'Bilder-Freistellung aktualisieren'}</button>}
     {error && <div className="form-error">{error}</div>}<button className="primary-button" disabled={saving} aria-busy={saving}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? processingStatus || 'Wird gespeichert ...' : product ? 'Änderungen speichern' : 'Produkt veröffentlichen'}</button>
   </form>
@@ -1026,6 +1033,7 @@ function CategoryManager({ products, onReorderProducts }: { products: Product[];
 
 function ChangeNotes() {
   const entries = [
+    { date: '2026-10-20', title: 'Freistellung gezielt steuern', details: 'Neue Produktbilder bleiben standardmäßig unverändert; die Freistellung kann beim Speichern optional aktiviert werden. Im Admin lassen sich Produkte im ausklappbaren Bereich „Bilder freistellen“ suchen und gezielt auswählen. Bereits freigestellte Bilder werden bei der Sammelverarbeitung übersprungen.' },
     { date: '2026-10-20', title: 'Produkte mit Extras anpassbar machen', details: 'Extras werden im Admin-Bereich separat verwaltet und bleiben aus dem öffentlichen Katalog ausgeblendet. Für ausgewählte Produkte können Extras angeboten werden; Käufer fügen diese über „Anpassen“ optional hinzu. Extra-Preise, Warenkorb und Lagerabbuchung werden bei Bestellungen berücksichtigt.' },
     { date: '2026-10-20', title: 'Originalbilder und Admin-Rückmeldungen verbessert', details: 'Neue Produkt-Originale werden privat gespeichert und bei jeder Freistellung erneut als Quelle verwendet. Lösch- und Speicheraktionen zeigen jetzt direkt im jeweiligen Button, wenn sie noch laufen. Alle Kategorien verwenden jetzt das einheitliche Farbschema von „Alle Produkte“.' },
     { date: '2026-10-20', title: 'Kategorieverwaltung und Produktbilder verbessert', details: 'Der Kategorienfehler wurde in der API korrigiert. Produktsortierungen werden je Kategorie verwaltet, Bilder lassen sich einzeln löschen und die Freistellung läuft im Hintergrund, damit die Seite bedienbar bleibt. Die Warenkorb-Minus- und Plus-Buttons sind getauscht; Kategoriegrößen und Rahmenoptionen sind aus der Verwaltung entfernt.' },
@@ -1111,6 +1119,8 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
   const [loadError, setLoadError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [backgroundJob, setBackgroundJob] = useState<{ running: boolean; completed: number; total: number; errors: string[] } | null>(null)
+  const [backgroundProductSearch, setBackgroundProductSearch] = useState('')
+  const [selectedBackgroundProductIds, setSelectedBackgroundProductIds] = useState<number[]>([])
   const [deletingProductId, setDeletingProductId] = useState<number | null>(null)
   const [deletingImageId, setDeletingImageId] = useState<number | null>(null)
   const [imageActionError, setImageActionError] = useState('')
@@ -1204,9 +1214,19 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
     setBackgroundJob({ running: false, completed: images.length, total: images.length, errors })
     await Promise.all([loadAllProducts(), load()]).catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Produktbilder wurden verarbeitet, aber die aktualisierte Liste konnte nicht geladen werden.'))
   }
-  const removeBackgroundFromAllImages = () => {
-    const images = allProducts.flatMap((product) => product.images.filter((image) => !image.backgroundRemoved).map((image) => ({ product, image })))
-    return processBackgroundImages(images, `Die Hintergründe der ${images.length} noch nicht freigestellten Produktbilder werden entfernt. Bereits freigestellte Bilder bleiben unverändert. Fortfahren?`)
+  const backgroundEligibleProducts = allProducts.filter((product) => product.images.some((image) => !image.backgroundRemoved))
+  const visibleBackgroundProducts = allProducts.filter((product) => product.name.toLocaleLowerCase('de-DE').includes(backgroundProductSearch.trim().toLocaleLowerCase('de-DE')))
+  const visibleSelectableBackgroundProducts = visibleBackgroundProducts.filter((product) => product.images.some((image) => !image.backgroundRemoved))
+  const allVisibleBackgroundProductsSelected = visibleSelectableBackgroundProducts.length > 0 && visibleSelectableBackgroundProducts.every((product) => selectedBackgroundProductIds.includes(product.id))
+  const selectedBackgroundImages = allProducts
+    .filter((product) => selectedBackgroundProductIds.includes(product.id))
+    .flatMap((product) => product.images.filter((image) => !image.backgroundRemoved).map((image) => ({ product, image })))
+  const removeBackgroundFromSelectedProducts = () => {
+    const images = allProducts
+      .filter((product) => selectedBackgroundProductIds.includes(product.id))
+      .flatMap((product) => product.images.filter((image) => !image.backgroundRemoved).map((image) => ({ product, image })))
+    if (images.length === 0) return
+    return processBackgroundImages(images, `Die Hintergründe von ${images.length} noch nicht freigestellten Bild(ern) aus ${new Set(images.map(({ product }) => product.id)).size} ausgewählten Produkt(en) werden entfernt. Bereits freigestellte Bilder bleiben unverändert. Fortfahren?`)
   }
   const refreshProductBackground = async (product: Product) => {
     await processBackgroundImages(
@@ -1219,7 +1239,6 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
   const saveProductOrder = async (categoryId: string, orderedIds: number[]) => {
     await request(`/api/admin/categories/${encodeURIComponent(categoryId)}/products/reorder`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderedIds }) })
   }
-  const pendingBackgroundImageCount = allProducts.reduce((total, product) => total + product.images.filter((image) => !image.backgroundRemoved).length, 0)
   return <div className="admin-shell">
     <header className="admin-header"><a className="brand admin-brand" href="#"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M10 24h23m-10-11 11 11-11 11" /></svg></span>Amspind</a><div className="admin-title"><strong>Produktverwaltung</strong><span>Amspind</span></div><div className="admin-actions"><button className="text-button" onClick={onExit}>Öffentliche Seite</button><button className="logout" onClick={async () => { await request('/api/auth/logout', { method: 'POST' }); setLoggedIn(false) }}>Abmelden</button></div></header>
     <main className="admin-main">
@@ -1231,7 +1250,22 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
         </details>
           <details className="admin-accordion products-accordion">
             <summary><span className="accordion-summary-copy"><strong>Produkte</strong><small>{products.length} Produkte · suchen und bearbeiten</small></span></summary>
-          <section className="admin-section product-management-panel"><div className="admin-panel-actions"><p className="reorder-hint">Produkte verwalten und Bilder bearbeiten.</p><div className="product-toolbar-actions"><button className="secondary-button" disabled={Boolean(backgroundJob?.running) || pendingBackgroundImageCount === 0} onClick={() => { void removeBackgroundFromAllImages() }}>{backgroundJob?.running ? `Freigestellt (${backgroundJob.completed}/${backgroundJob.total})` : `Bilder-Freistellung aktualisieren · ${pendingBackgroundImageCount}`}</button><button className="primary-button compact" onClick={() => setEditing('new')}>+ Produkt hinzufügen</button></div></div>
+          <section className="admin-section product-management-panel"><div className="admin-panel-actions"><p className="reorder-hint">Produkte verwalten und Bilder bearbeiten.</p><div className="product-toolbar-actions"><button className="primary-button compact" onClick={() => setEditing('new')}>+ Produkt hinzufügen</button></div></div>
+          <details className="image-background-accordion">
+            <summary><span className="image-background-summary"><strong>Bilder freistellen</strong><small>{backgroundEligibleProducts.length} Produkt(e) mit noch nicht freigestellten Bildern</small></span></summary>
+            <div className="image-background-controls">
+              <label className="search-box image-background-search"><span aria-hidden="true">⌕</span><input value={backgroundProductSearch} onChange={(event) => setBackgroundProductSearch(event.target.value)} placeholder="Produkt suchen ..." aria-label="Produkte für Freistellung suchen" /></label>
+              <label className="image-background-select-all"><input type="checkbox" checked={allVisibleBackgroundProductsSelected} disabled={!visibleSelectableBackgroundProducts.length || Boolean(backgroundJob?.running)} onChange={(event) => setSelectedBackgroundProductIds((current) => event.target.checked ? [...new Set([...current, ...visibleSelectableBackgroundProducts.map((product) => product.id)])] : current.filter((id) => !visibleSelectableBackgroundProducts.some((product) => product.id === id)))} /><span>Alle sichtbaren Produkte mit unbearbeiteten Bildern auswählen</span></label>
+              <div className="image-background-product-list">
+                {visibleBackgroundProducts.map((product) => {
+                  const pendingCount = product.images.filter((image) => !image.backgroundRemoved).length
+                  return <label className={`image-background-product ${pendingCount === 0 ? 'already-processed' : ''}`} key={product.id}><input type="checkbox" checked={selectedBackgroundProductIds.includes(product.id)} disabled={Boolean(backgroundJob?.running) || pendingCount === 0} onChange={(event) => setSelectedBackgroundProductIds((current) => event.target.checked ? [...new Set([...current, product.id])] : current.filter((id) => id !== product.id))} /><span><strong>{product.name}</strong><small>{pendingCount > 0 ? `${pendingCount} ${pendingCount === 1 ? 'Bild' : 'Bilder'} noch nicht freigestellt` : 'Alle Bilder bereits freigestellt'}</small></span></label>
+                })}
+                {visibleBackgroundProducts.length === 0 && <p className="muted">{backgroundProductSearch ? 'Keine passenden Produkte mit unbearbeiteten Bildern gefunden.' : 'Alle Produktbilder sind bereits freigestellt.'}</p>}
+              </div>
+              <div className="image-background-actions"><span>{selectedBackgroundImages.length} Bild(er) ausgewählt</span><div><button type="button" className="secondary-button" disabled={Boolean(backgroundJob?.running) || selectedBackgroundProductIds.length === 0} onClick={() => setSelectedBackgroundProductIds([])}>Auswahl leeren</button><button type="button" className="secondary-button" disabled={Boolean(backgroundJob?.running) || selectedBackgroundImages.length === 0} onClick={() => { void removeBackgroundFromSelectedProducts() }}>{backgroundJob?.running ? `Freigestellt (${backgroundJob.completed}/${backgroundJob.total})` : 'Ausgewählte Bilder freistellen'}</button></div></div>
+            </div>
+          </details>
           {backgroundJob && <div className={`background-job-status ${backgroundJob.errors.length ? 'has-errors' : ''}`} role={backgroundJob.running ? 'status' : 'region'} aria-live="polite"><strong>{backgroundJob.running ? `Bilder werden freigestellt: ${backgroundJob.completed} von ${backgroundJob.total}` : backgroundJob.errors.length ? `Freistellen abgeschlossen: ${backgroundJob.completed - backgroundJob.errors.length} von ${backgroundJob.total} erfolgreich` : `Alle ${backgroundJob.total} Bilder wurden freigestellt.`}</strong>{backgroundJob.running && <progress max={backgroundJob.total} value={backgroundJob.completed} />}{Boolean(backgroundJob.errors.length) && <details><summary>{backgroundJob.errors.length} Bild(er) konnten nicht freigestellt werden</summary><ul>{backgroundJob.errors.slice(0, 20).map((message) => <li key={message}>{message}</li>)}</ul>{backgroundJob.errors.length > 20 && <p>Weitere {backgroundJob.errors.length - 20} Fehler ausgeblendet.</p>}</details>}</div>}
           <div className="admin-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nach Produkt suchen ..." /></label><span>{products.length} Produkte</span></div>
           {loadError && <div className="form-error" role="alert">{loadError}</div>}
