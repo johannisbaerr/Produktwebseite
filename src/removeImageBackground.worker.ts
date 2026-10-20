@@ -86,13 +86,15 @@ async function removeBackground(file: File) {
     const maskContext = maskCanvas.getContext('2d')
     if (!maskContext) throw new Error('Die Bildverarbeitung wird von diesem Browser nicht unterstützt.')
     const maskPixels = maskContext.createImageData(modelSize, modelSize)
-    const range = maximum - minimum
     for (let pixel = 0; pixel < planeSize; pixel++) {
       const target = pixel * 4
       maskPixels.data[target] = 255
       maskPixels.data[target + 1] = 255
       maskPixels.data[target + 2] = 255
-      maskPixels.data[target + 3] = Math.round(Math.max(0, Math.min(1, (output.data[pixel] - minimum) / range)) * 255)
+      const probability = Math.max(0, Math.min(1, output.data[pixel]))
+      const edgePosition = Math.max(0, Math.min(1, (probability - 0.16) / (0.84 - 0.16)))
+      const softenedAlpha = edgePosition * edgePosition * (3 - 2 * edgePosition)
+      maskPixels.data[target + 3] = Math.round(softenedAlpha * 255)
     }
     maskContext.putImageData(maskPixels, 0, 0)
 

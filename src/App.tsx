@@ -8,7 +8,7 @@ import type { CSSProperties } from 'react'
 import { removeImageBackground } from './removeImageBackground'
 import './App.css'
 
-type Image = { id: number; url: string; originalName: string; backgroundRemoved?: boolean }
+type Image = { id: number; url: string; originalUrl?: string; originalName: string; backgroundRemoved?: boolean }
 type Product = { id: number; name: string; description: string; priceCents: number; stock: number; status: 'active' | 'unlisted'; searchTerms?: string[]; categoryIds?: string[]; images: Image[]; updatedAt: string }
 type CategoryDesignSettings = { width: number; height: number; borderWidth: number; borderColor: string; backgroundColor: string; textColor: string }
 type Category = { id: string; name: string; sortOrder: number; design: string; designSettings: CategoryDesignSettings; previewMode: 'products' | 'upload'; previewImageUrl: string | null; productIds: number[] }
@@ -25,9 +25,9 @@ const categoryCardStyle = (settings: CategoryDesignSettings): CSSProperties => (
   '--category-width': `${settings.width}px`,
   '--category-height': `${settings.height}px`,
   '--category-border-width': `${settings.borderWidth}px`,
-  '--category-border-color': settings.borderColor,
-  '--category-background': settings.backgroundColor,
-  '--category-text': settings.textColor,
+  '--category-border-color': defaultCategoryDesignSettings.borderColor,
+  '--category-background': defaultCategoryDesignSettings.backgroundColor,
+  '--category-text': defaultCategoryDesignSettings.textColor,
 } as CSSProperties)
 const allProductsCategory: Category = { id: 'all-products', name: 'Alle Produkte', sortOrder: 0, design: 'Kachel', designSettings: defaultCategoryDesignSettings, previewMode: 'products', previewImageUrl: null, productIds: [] }
 const categoryDesigns = ['Kachel', 'Panorama', 'Kompakt']
@@ -140,7 +140,7 @@ function matchesSearch(product: Product, categoryNames: string[], search: string
   ))
 }
 
-function Gallery({ product, admin = false, priority = false, onDeleteImage }: { product: Product; admin?: boolean; priority?: boolean; onDeleteImage?: (imageId: number) => void }) {
+function Gallery({ product, admin = false, priority = false, onDeleteImage, deletingImageId }: { product: Product; admin?: boolean; priority?: boolean; onDeleteImage?: (imageId: number) => void; deletingImageId?: number | null }) {
   const [selected, setSelected] = useState(0)
   const [direction, setDirection] = useState(1)
   const startTouch = useRef<{ x: number; y: number } | null>(null)
@@ -153,10 +153,10 @@ function Gallery({ product, admin = false, priority = false, onDeleteImage }: { 
   return <div className="gallery"><div className="gallery-main" onTouchStart={(event) => { startTouch.current = { x: event.touches[0].clientX, y: event.touches[0].clientY } }} onTouchEnd={(event) => { if (startTouch.current === null) return; const distanceX = event.changedTouches[0].clientX - startTouch.current.x; const distanceY = event.changedTouches[0].clientY - startTouch.current.y; if (Math.abs(distanceX) > 35 && Math.abs(distanceX) > Math.abs(distanceY)) move(distanceX > 0 ? -1 : 1); startTouch.current = null }}>
     {image ? <img key={image.url} className="gallery-current-image" style={{ '--slide-offset': direction > 0 ? '28px' : '-28px' } as CSSProperties} src={image.url} alt={product.name} loading={priority ? 'eager' : 'lazy'} decoding="async" fetchPriority={priority ? 'high' : 'auto'} /> : <div className="image-placeholder">Kein Bild</div>}
     {admin && image?.backgroundRemoved && <span className="background-removed-badge">✓ Freigestellt</span>}
-    {admin && image && onDeleteImage && <button type="button" className="gallery-image-delete" onClick={() => onDeleteImage(image.id)} aria-label={`${image.originalName} löschen`} title="Dieses Bild löschen">Bild löschen</button>}
+    {admin && image && onDeleteImage && <button type="button" className="gallery-image-delete" disabled={deletingImageId === image.id} aria-busy={deletingImageId === image.id} onClick={() => onDeleteImage(image.id)} aria-label={deletingImageId === image.id ? 'Bild wird gelöscht' : `${image.originalName} löschen`} title="Dieses Bild löschen">{deletingImageId === image.id && <span className="button-spinner" aria-hidden="true" />} {deletingImageId === image.id ? 'Wird gelöscht ...' : 'Bild löschen'}</button>}
     {product.images.length > 1 && <><button className="gallery-arrow left" aria-label="Vorheriges Bild" onClick={() => move(-1)}>←</button><button className="gallery-arrow right" aria-label="Nächstes Bild" onClick={() => move(1)}>→</button></>}
     <span className="image-count">{product.images.length ? `${selected + 1} / ${product.images.length}` : '0 Bilder'}</span>
-  </div>{product.images.length > 1 && <div className="thumbnails">{product.images.map((item, index) => <div className={`thumbnail-wrap ${index === selected ? 'selected' : ''}`} key={item.id}><button className="thumbnail" onClick={() => setSelected(index)}><img src={item.url} alt={`${product.name} Ansicht ${index + 1}`} loading="lazy" decoding="async" /></button>{admin && onDeleteImage && <button className="thumbnail-remove" onClick={() => onDeleteImage(item.id)} aria-label="Bild entfernen">×</button>}</div>)}</div>}</div>
+  </div>{product.images.length > 1 && <div className="thumbnails">{product.images.map((item, index) => <div className={`thumbnail-wrap ${index === selected ? 'selected' : ''}`} key={item.id}><button className="thumbnail" onClick={() => setSelected(index)}><img src={item.url} alt={`${product.name} Ansicht ${index + 1}`} loading="lazy" decoding="async" /></button>{admin && onDeleteImage && <button className="thumbnail-remove" disabled={deletingImageId === item.id} onClick={() => onDeleteImage(item.id)} aria-label={deletingImageId === item.id ? 'Bild wird gelöscht' : 'Bild entfernen'}>{deletingImageId === item.id ? '…' : '×'}</button>}</div>)}</div>}</div>
 }
 
 function CategoryPreview({ category, products }: { category: Category; products: Product[] }) {
@@ -627,6 +627,7 @@ function ProductForm({ product, onSaved, onCancel, onRefreshBackground, backgrou
         for (const [index, file] of selectedFiles.entries()) {
           setProcessingStatus(`Hintergrund entfernen (${index + 1}/${selectedFiles.length}) ...`)
           const processedFile = await removeImageBackground(file)
+          data.append('originalImages', file, `amspind-original-${file.name}`)
           data.append('images', new File([processedFile], `amspind-freigestellt-${processedFile.name}`, { type: processedFile.type, lastModified: processedFile.lastModified }))
         }
       }
@@ -644,19 +645,19 @@ function ProductForm({ product, onSaved, onCancel, onRefreshBackground, backgrou
     <label>Zusätzliche Suchbegriffe<input value={form.searchTerms} onChange={(e) => setForm({ ...form, searchTerms: e.target.value })} placeholder="z. B. süß, Getränk, Apfel" /><small>Kommagetrennte Begriffe helfen bei Synonymen und Schreibvarianten. Sie sind direkt am Produkt gespeichert.</small></label>
     <div className="form-row"><label>Preis in EUR<input required inputMode="decimal" min="0" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="0,00" /></label><label>Lagerbestand<input required type="number" min="0" step="1" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} placeholder="0" /></label></div>
     <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as 'active' | 'unlisted' })}><option value="active">Aktiv gelistet</option><option value="unlisted">Nicht gelistet</option></select></label>
-    <label className="file-drop">Produktbilder{product && <small>Bestehende Bilder bleiben erhalten. Neue Dateien werden ergänzt.</small>}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required={!product} onChange={(e) => setFiles(e.target.files)} /><span>{files?.length ? `${files.length} Bild(er) ausgewählt` : 'Bilder auswählen oder hierher ziehen'}</span><small className="background-removal-note">Neue Bilder werden vor dem Upload lokal im Browser freigestellt. Beim ersten Mal wird dafür ein KI-Modell (ca. 46 MB) geladen; die ausgewählten Originaldateien werden nicht an den Shop übertragen.</small></label>
+    <label className="file-drop">Produktbilder{product && <small>Bestehende Bilder bleiben erhalten. Neue Dateien werden ergänzt.</small>}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required={!product} onChange={(e) => setFiles(e.target.files)} /><span>{files?.length ? `${files.length} Bild(er) ausgewählt` : 'Bilder auswählen oder hierher ziehen'}</span><small className="background-removal-note">Das Original bleibt dauerhaft erhalten; die Freistellung wird als Shop-Bild gespeichert. Beim ersten Mal wird das KI-Modell (ca. 46 MB) geladen.</small></label>
     {product && onRefreshBackground && <button type="button" className="secondary-button" disabled={saving || backgroundBusy} onClick={() => { void onRefreshBackground(product) }}>{backgroundBusy ? 'Freistellung wird aktualisiert ...' : 'Bilder-Freistellung aktualisieren'}</button>}
-    {error && <div className="form-error">{error}</div>}<button className="primary-button" disabled={saving}>{saving ? processingStatus || 'Wird gespeichert ...' : product ? 'Änderungen speichern' : 'Produkt veröffentlichen'}</button>
+    {error && <div className="form-error">{error}</div>}<button className="primary-button" disabled={saving} aria-busy={saving}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? processingStatus || 'Wird gespeichert ...' : product ? 'Änderungen speichern' : 'Produkt veröffentlichen'}</button>
   </form>
 }
 
-function SortableProduct({ product, disabled, onEdit, onDelete, showDragHandle = true }: { product: Product; disabled: boolean; onEdit?: () => void; onDelete?: () => void; showDragHandle?: boolean }) {
+function SortableProduct({ product, disabled, onEdit, onDelete, showDragHandle = true, deleting = false }: { product: Product; disabled: boolean; onEdit?: () => void; onDelete?: () => void; showDragHandle?: boolean; deleting?: boolean }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } = useSortable({ id: product.id, disabled })
   return <article ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={`admin-product ${isDragging ? 'is-dragging' : ''} ${isOver ? 'is-drop-target' : ''}`}>
     {showDragHandle && <button className="drag-handle" type="button" disabled={disabled} aria-label={`${product.name} ziehen, um die Position zu ändern`} {...attributes} {...listeners}>⠿</button>}
     <div className="admin-thumb">{product.images[0] && <img src={product.images[0].url} alt="" />}</div>
     <div className="admin-product-main"><div className="admin-product-title"><h3>{product.name}</h3><span className={`status ${product.status}`}>{product.status === 'active' && product.stock > 0 ? 'Aktiv' : 'Nicht gelistet'}</span></div><p>{product.description}</p><span className="admin-meta">{currency.format(product.priceCents / 100)} · {product.stock} auf Lager · {product.images.length} Bilder</span></div>
-    {onEdit && onDelete && <div className="admin-product-actions"><button className="edit-button" onClick={onEdit}>Bearbeiten <span>↗</span></button><button className="delete-button" onClick={onDelete}>Löschen</button></div>}
+    {onEdit && onDelete && <div className="admin-product-actions"><button className="edit-button" disabled={deleting} onClick={onEdit}>Bearbeiten <span>↗</span></button><button className="delete-button" disabled={deleting} aria-busy={deleting} onClick={onDelete}>{deleting && <span className="button-spinner" aria-hidden="true" />} {deleting ? 'Wird gelöscht ...' : 'Löschen'}</button></div>}
   </article>
 }
 
@@ -722,6 +723,7 @@ function CategoryManager({ products, onReorderProducts }: { products: Product[];
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [draggingCategoryId, setDraggingCategoryId] = useState<string | null>(null)
   const [previewImageUrl, setPreviewImageUrl] = useState('')
   const categoriesRef = useRef<Category[]>([allProductsCategory])
@@ -808,8 +810,11 @@ function CategoryManager({ products, onReorderProducts }: { products: Product[];
   }
   const remove = async () => {
     if (!selected || !window.confirm(`Kategorie „${selected.name}“ löschen? Die Produkte selbst bleiben erhalten.`)) return
+    setDeleting(true)
+    setError('')
     try { await request(`/api/admin/categories/${selected.id}`, { method: 'DELETE' }); setSelectedId(''); await load() }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Kategorie konnte nicht gelöscht werden.') }
+    finally { setDeleting(false) }
   }
   const previewCategory: Category = {
     id: selected?.id || 'category-preview',
@@ -832,20 +837,13 @@ function CategoryManager({ products, onReorderProducts }: { products: Product[];
         </SortableContext>
         <DragOverlay>{categories.find((category) => category.id === draggingCategoryId) && <div className="category-admin-row category-admin-row-overlay"><span className="drag-handle category-drag-handle" aria-hidden="true">⠿</span><span className="category-select">{categories.find((category) => category.id === draggingCategoryId)?.name}</span></div>}</DragOverlay>
       </DndContext>
-      <form className="category-create" onSubmit={(event) => { event.preventDefault(); void create() }}><label htmlFor="new-category-name">Neue Kategorie</label><input id="new-category-name" value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Kategoriename" aria-label="Name der neuen Kategorie" maxLength={80} /><button className="primary-button" type="submit" disabled={creating}>{creating ? 'Wird hinzugefügt ...' : '+ Kategorie hinzufügen'}</button></form>
+      <form className="category-create" onSubmit={(event) => { event.preventDefault(); void create() }}><label htmlFor="new-category-name">Neue Kategorie</label><input id="new-category-name" value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Kategoriename" aria-label="Name der neuen Kategorie" maxLength={80} /><button className="primary-button" type="submit" disabled={creating} aria-busy={creating}>{creating && <span className="button-spinner" aria-hidden="true" />} {creating ? 'Wird hinzugefügt ...' : '+ Kategorie hinzufügen'}</button></form>
     </div>
       <div className={`category-editor ${selected?.id === 'all-products' ? 'all-products-editor' : ''}`}>{selected ? <>
-        {selected.id === 'all-products' && <div className="fixed-category-note">„Alle Produkte“ bleibt eine feste Kategorie. Hier kannst du nur das Design ändern; die übrigen Einstellungen sind deaktiviert.</div>}
+        {selected.id === 'all-products' && <div className="fixed-category-note">„Alle Produkte“ bleibt eine feste Kategorie. Alle Kategorien nutzen das einheitliche Farbschema; du kannst hier nur das Kartenlayout ändern.</div>}
         <label className={selected.id === 'all-products' ? 'disabled-category-setting' : ''}>Kategoriename<input value={name} disabled={selected.id === 'all-products'} onChange={(event) => setName(event.target.value)} maxLength={80} /></label>
         <label>Design<select value={design} onChange={(event) => setDesign(event.target.value)}>{categoryDesigns.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
         <CategoryDesignPreview category={previewCategory} products={previewProducts} />
-        <details className="category-design-options">
-          <summary>Farben</summary>
-          <div className="category-design-controls">
-            <label className="category-color-setting">Hintergrundfarbe<input type="color" value={designSettings.backgroundColor} onChange={(event) => setDesignSettings((current) => ({ ...current, backgroundColor: event.target.value }))} /></label>
-            <label className="category-color-setting">Schriftfarbe<input type="color" value={designSettings.textColor} onChange={(event) => setDesignSettings((current) => ({ ...current, textColor: event.target.value }))} /></label>
-          </div>
-        </details>
         <label className={selected.id === 'all-products' ? 'disabled-category-setting' : ''}>Vorschaubild<select disabled={selected.id === 'all-products'} value={previewMode} onChange={(event) => setPreviewMode(event.target.value as 'products' | 'upload')}><option value="products">Aus Produktbildern wechseln</option><option value="upload">Eigenes Bild hochladen</option></select></label>
         {previewMode === 'upload' && <label className={`file-drop ${selected.id === 'all-products' ? 'disabled-category-setting' : ''}`}>Kategorie-Bild<input disabled={selected.id === 'all-products'} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => setPreviewFile(event.target.files?.[0] || null)} /><span>{previewFile?.name || (selected.previewImageUrl ? 'Bild vorhanden – neues Bild auswählen zum Ersetzen' : 'Bild auswählen')}</span></label>}
         <fieldset className={`product-picker ${selected.id === 'all-products' ? 'disabled-category-setting' : ''}`} disabled={selected.id === 'all-products'}><legend>Produkte dieser Kategorie</legend>{products.length ? products.map((product) => <label key={product.id} className="product-choice"><input type="checkbox" checked={selected.id === 'all-products' || selectedProducts.includes(product.id)} onChange={(event) => setSelectedProducts((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} /><span>{product.name} <small>{product.status === 'unlisted' ? '· Nicht gelistet (öffentlich ausgeblendet)' : ''}</small></span></label>) : <p className="muted">Noch keine Produkte angelegt.</p>}</fieldset>
@@ -853,13 +851,14 @@ function CategoryManager({ products, onReorderProducts }: { products: Product[];
           <summary>Produktsortierung</summary>
           <CategoryProductOrderManager category={selected} products={selected.id === 'all-products' ? products : products.filter((product) => selected.productIds.includes(product.id))} onReorder={reorderCategoryProducts} />
         </details>
-        <div className="category-editor-actions"><button className="primary-button" disabled={busy} onClick={() => { void save() }}>{busy ? 'Wird gespeichert ...' : selected.id === 'all-products' ? 'Design speichern' : 'Kategorie speichern'}</button>{selected.id !== 'all-products' && <button className="delete-button" onClick={() => { void remove() }}>Kategorie löschen</button>}</div>
+        <div className="category-editor-actions"><button className="primary-button" disabled={busy || deleting} aria-busy={busy} onClick={() => { void save() }}>{busy && <span className="button-spinner" aria-hidden="true" />} {busy ? 'Wird gespeichert ...' : selected.id === 'all-products' ? 'Design speichern' : 'Kategorie speichern'}</button>{selected.id !== 'all-products' && <button className="delete-button" disabled={deleting || busy} aria-busy={deleting} onClick={() => { void remove() }}>{deleting && <span className="button-spinner" aria-hidden="true" />} {deleting ? 'Kategorie wird gelöscht ...' : 'Kategorie löschen'}</button>}</div>
       </> : <div className="category-editor-empty"><span aria-hidden="true">↖</span><p className="muted">Wähle links eine Kategorie aus, um sie zu öffnen und zu bearbeiten.</p></div>}</div></div>
   </section>
 }
 
 function ChangeNotes() {
   const entries = [
+    { date: '2026-10-20', title: 'Originalbilder und Admin-Rückmeldungen verbessert', details: 'Neue Produkt-Originale werden privat gespeichert und bei jeder Freistellung erneut als Quelle verwendet. Lösch- und Speicheraktionen zeigen jetzt direkt im jeweiligen Button, wenn sie noch laufen. Alle Kategorien verwenden jetzt das einheitliche Farbschema von „Alle Produkte“.' },
     { date: '2026-10-20', title: 'Kategorieverwaltung und Produktbilder verbessert', details: 'Der Kategorienfehler wurde in der API korrigiert. Produktsortierungen werden je Kategorie verwaltet, Bilder lassen sich einzeln löschen und die Freistellung läuft im Hintergrund, damit die Seite bedienbar bleibt. Die Warenkorb-Minus- und Plus-Buttons sind getauscht; Kategoriegrößen und Rahmenoptionen sind aus der Verwaltung entfernt.' },
     { date: '2026-10-20', title: 'Warenkorb und Suche flüssiger bedienbar', details: 'Der Warenkorb öffnet und schließt jetzt mit einem sanften Übergang. Suchergebnisse und Warenkorb-Schaltflächen erscheinen ruhiger; entfernte Artikel blenden sich kurz aus. Die Animationen respektieren die reduzierte Bewegung des Geräts.' },
     { date: '2026-10-20', title: 'Startseite und Warenkorb auf dem Handy verbessert', details: 'Kategorie-Karten stehen auf kleinen Displays zweispaltig und lassen sich vertikal durchscrollen. Produktbilder wechseln mit einer seitlichen Animation. Produkte können direkt in der Liste erhöht oder vollständig aus dem Warenkorb entfernt werden; nicht verfügbare weitere Stücke werden markiert.' },
@@ -928,7 +927,7 @@ function OrderDetails({ token }: { token: string }) {
     {order.fulfilledAt
       ? <p className="order-stock-status" role="status">Bestand wurde am {new Date(order.fulfilledAt).toLocaleString('de-DE')} abgezogen.</p>
       : <div className="order-stock-actions">{error && !confirmDeduction && <div className="form-error" role="alert">{error}</div>}<p className="muted">{hasAnswered ? 'Der Lagerbestand wurde nicht verändert.' : 'Der Lagerbestand wurde noch nicht verändert.'}</p><button className="primary-button" disabled={deducting} onClick={() => { setError(''); setConfirmDeduction(true) }}>Bestand jetzt abziehen</button></div>}
-    {confirmDeduction && <div className="modal-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="deduct-stock-title"><h2 id="deduct-stock-title">Bestellte Artikel vom Lagerbestand abziehen?</h2><p className="muted">Die Mengen dieser Bestellung werden einmalig vom Bestand abgezogen.</p>{error && <div className="form-error" role="alert">{error}</div>}<div><button className="primary-button" disabled={deducting} onClick={() => { void deductStock() }}>{deducting ? 'Bestand wird aktualisiert ...' : 'Ja'}</button><button className="secondary-button" disabled={deducting} onClick={() => { setConfirmDeduction(false); setHasAnswered(true) }}>Nein</button></div></section></div>}
+    {confirmDeduction && <div className="modal-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="deduct-stock-title"><h2 id="deduct-stock-title">Bestellte Artikel vom Lagerbestand abziehen?</h2><p className="muted">Die Mengen dieser Bestellung werden einmalig vom Bestand abgezogen.</p>{error && <div className="form-error" role="alert">{error}</div>}<div><button className="primary-button" disabled={deducting} aria-busy={deducting} onClick={() => { void deductStock() }}>{deducting && <span className="button-spinner" aria-hidden="true" />} {deducting ? 'Bestand wird aktualisiert ...' : 'Ja'}</button><button className="secondary-button" disabled={deducting} onClick={() => { setConfirmDeduction(false); setHasAnswered(true) }}>Nein</button></div></section></div>}
   </section>
 }
 
@@ -942,6 +941,9 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
   const [loadError, setLoadError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [backgroundJob, setBackgroundJob] = useState<{ running: boolean; completed: number; total: number; errors: string[] } | null>(null)
+  const [deletingProductId, setDeletingProductId] = useState<number | null>(null)
+  const [deletingImageId, setDeletingImageId] = useState<number | null>(null)
+  const [imageActionError, setImageActionError] = useState('')
   const productsRef = useRef(products)
   useEffect(() => {
     request('/api/auth/me')
@@ -968,11 +970,33 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
   if (!loggedIn) return <div className="login-page"><button className="back-link" onClick={onExit}>← Zur öffentlichen Seite</button><div className="login-box"><span className="login-symbol">Amspind</span><p className="eyebrow">Produktverwaltung</p><h1>Admin-Anmeldung</h1><p className="login-intro">{orderToken ? 'Diese Bestellung ist nur nach Admin-Anmeldung sichtbar.' : 'Melde dich an, um Produkte und Kategorien zu verwalten.'}</p><form onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); try { await request('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: form.get('username'), password: form.get('password') }) }); setLoggedIn(true) } catch (e) { setLoginError(e instanceof Error ? e.message : 'Login fehlgeschlagen.') } }}><label>Benutzername<input name="username" required defaultValue="admin" /></label><label className="password-field">Passwort<div className="password-input-wrap"><input name="password" type={showPassword ? 'text' : 'password'} required /><button type="button" className="password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Passwort verbergen' : 'Passwort anzeigen'}>{showPassword ? '🙈' : '👁'}</button></div></label>{loginError && <div className="form-error">{loginError}</div>}<button className="primary-button">Anmelden <span>↗</span></button></form><p className="login-note">Nur für den internen Gebrauch.</p></div></div>
   const deleteProduct = async (product: Product) => {
     if (!window.confirm(`„${product.name}“ wirklich endgültig löschen? Dieser Vorgang kann nicht rückgängig gemacht werden.`)) return
+    setDeletingProductId(product.id)
+    setLoadError('')
     try { await request(`/api/admin/products/${product.id}`, { method: 'DELETE' }); await load() }
     catch (reason) { setLoadError(reason instanceof Error ? reason.message : 'Produkt konnte nicht gelöscht werden.') }
+    finally { setDeletingProductId(null) }
+  }
+  const deleteProductImage = async (imageId: number) => {
+    if (typeof editing === 'string' || !editing) return
+    const product = editing
+    const image = product.images.find((entry) => entry.id === imageId)
+    if (!image || !window.confirm(`Bild „${image.originalName}“ löschen?`)) return
+    setDeletingImageId(imageId)
+    setImageActionError('')
+    try {
+      await request(`/api/admin/products/${product.id}/images/${imageId}`, { method: 'DELETE' })
+      const updated = await request<Product[]>(`/api/admin/products?search=${encodeURIComponent(product.name)}`)
+      setEditing(updated.find((item) => item.id === product.id) || product)
+      void loadAllProducts()
+    } catch (reason) {
+      setImageActionError(reason instanceof Error ? reason.message : 'Produktbild konnte nicht gelöscht werden.')
+    } finally {
+      setDeletingImageId(null)
+    }
   }
   const processBackgroundImage = async (product: Product, image: Image) => {
-    const response = await fetch(image.url)
+    if (!image.originalUrl) throw new Error('Für dieses ältere Bild ist kein gespeichertes Original vorhanden. Neue Produktbilder bewahren das Original automatisch auf.')
+    const response = await fetch(image.originalUrl)
     if (!response.ok) throw new Error(`Bild konnte nicht geladen werden (HTTP ${response.status}).`)
     const sourceBlob = await response.blob()
     const sourceFile = new File([sourceBlob], image.originalName || `produkt-${product.id}-${image.id}`, { type: sourceBlob.type || 'image/png' })
@@ -1008,10 +1032,14 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
     const images = allProducts.flatMap((product) => product.images.filter((image) => !image.backgroundRemoved).map((image) => ({ product, image })))
     return processBackgroundImages(images, `Die Hintergründe der ${images.length} noch nicht freigestellten Produktbilder werden entfernt. Bereits freigestellte Bilder bleiben unverändert. Fortfahren?`)
   }
-  const refreshProductBackground = (product: Product) => processBackgroundImages(
-    product.images.map((image) => ({ product, image })),
-    `Die Freistellung aller ${product.images.length} Bilder von „${product.name}“ wird aktualisiert. Fortfahren?`,
-  )
+  const refreshProductBackground = async (product: Product) => {
+    await processBackgroundImages(
+      product.images.map((image) => ({ product, image })),
+      `Die Freistellung aller ${product.images.length} Bilder von „${product.name}“ wird anhand der gespeicherten Originale aktualisiert. Fortfahren?`,
+    )
+    const refreshedProducts = await request<Product[]>(`/api/admin/products?search=${encodeURIComponent(product.name)}`)
+    setEditing(refreshedProducts.find((entry) => entry.id === product.id) || product)
+  }
   const saveProductOrder = async (categoryId: string, orderedIds: number[]) => {
     await request(`/api/admin/categories/${encodeURIComponent(categoryId)}/products/reorder`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderedIds }) })
   }
@@ -1034,7 +1062,7 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
           <DndContext>
             <SortableContext items={products.map((product) => product.id)} strategy={verticalListSortingStrategy}>
               <div className="admin-list">
-                {products.map((product) => <SortableProduct key={product.id} product={product} disabled showDragHandle={false} onEdit={() => setEditing(product)} onDelete={() => { void deleteProduct(product) }} />)}
+                {products.map((product) => <SortableProduct key={product.id} product={product} disabled showDragHandle={false} deleting={deletingProductId === product.id} onEdit={() => setEditing(product)} onDelete={() => { void deleteProduct(product) }} />)}
                 {products.length === 0 && !loadError && <div className="admin-empty">{search ? 'Keine Produkte für diese Suche gefunden.' : 'Noch keine Produkte vorhanden.'}</div>}
               </div>
             </SortableContext>
@@ -1044,7 +1072,7 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
         <ChangeNotes />
       </>}
     </main>
-    {editing && <div className="modal-backdrop"><div className="modal"><ProductForm product={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onRefreshBackground={refreshProductBackground} backgroundBusy={Boolean(backgroundJob?.running)} onSaved={() => { setEditing(null); void load(); void loadAllProducts() }} />{editing !== 'new' && <div className="existing-images"><p className="eyebrow">Bilder verwalten</p><Gallery product={editing} admin onDeleteImage={async (imageId) => { const image = editing.images.find((entry) => entry.id === imageId); if (!image || !window.confirm(`Bild „${image.originalName}“ löschen?`)) return; try { await request(`/api/admin/products/${editing.id}/images/${imageId}`, { method: 'DELETE' }); const updated = await request<Product[]>(`/api/admin/products?search=${encodeURIComponent(editing.name)}`); setEditing(updated.find((item) => item.id === editing.id) || editing); void loadAllProducts() } catch (reason) { setLoadError(reason instanceof Error ? reason.message : 'Produktbild konnte nicht gelöscht werden.') } }} /></div>}</div></div>}
+    {editing && <div className="modal-backdrop"><div className="modal"><ProductForm product={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onRefreshBackground={refreshProductBackground} backgroundBusy={Boolean(backgroundJob?.running)} onSaved={() => { setEditing(null); void load(); void loadAllProducts() }} />{editing !== 'new' && <div className="existing-images"><p className="eyebrow">Bilder verwalten</p>{imageActionError && <div className="form-error" role="alert">{imageActionError}</div>}<Gallery product={editing} admin deletingImageId={deletingImageId} onDeleteImage={(imageId) => { void deleteProductImage(imageId) }} /></div>}</div></div>}
   </div>
 }
 
