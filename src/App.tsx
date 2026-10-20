@@ -619,7 +619,20 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
           </button>
         })}</div></> : <div className="category-empty"><strong>Deine Auswahl wird vorbereitet</strong><span>Bald findest du hier die Kategorien aus dem Spind.</span></div>}</>}
       </section>}
-      {(selectedCategory || search) && <section className={`collection ${isFullCatalog ? 'full-catalog' : ''}`} id="collection">      <div className="section-heading"><div><p className="eyebrow">{search ? 'Suchergebnisse' : 'Die aktuelle Auswahl'}</p><h2>{search ? `Suche: ${search}` : sortedCategories.find((category) => category.id === selectedCategory)?.name || 'Alle Produkte'}</h2></div><button className="back-to-categories" onClick={() => { saveCurrentViewToHistory({ search: '', category: '', cart: false }); setSelectedCategory(''); setSearch(''); setSearchInput(''); setCartError(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>← Kategorien</button><span className="product-total">{visibleProducts.length.toString().padStart(2, '0')} Artikel</span></div>
+      {(selectedCategory || search) && <section className={`collection ${isFullCatalog ? 'full-catalog' : ''}`} id="collection">
+        <div className="section-heading">
+          <div className="collection-heading-top">
+            <button className="back-to-categories" onClick={() => { saveCurrentViewToHistory({ search: '', category: '', cart: false }); setSelectedCategory(''); setSearch(''); setSearchInput(''); setCartError(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m7 7-7-7 7-7" /></svg>
+              <span>Startseite</span>
+            </button>
+            <span className="product-total">{visibleProducts.length.toString().padStart(2, '0')} Artikel</span>
+          </div>
+          <div className="collection-heading-copy">
+            <p className="eyebrow">{search ? 'Suchergebnisse' : 'Sortiment'}</p>
+            <h2>{search ? `Suche: ${search}` : sortedCategories.find((category) => category.id === selectedCategory)?.name || 'Alle Produkte'}</h2>
+          </div>
+        </div>
         {loading ? <div className="loading">Produkte werden geladen ...</div> : loadError ? <div className="loading" role="alert">{loadError}</div> : visibleProducts.length === 0 ? <div className="empty-public"><span>○</span><h3>{search ? 'Keine passenden Produkte gefunden' : 'Demnächst hier'}</h3><p>{search ? 'Versuche einen anderen Suchbegriff.' : 'Diese Auswahl wird gerade vorbereitet.'}</p></div> : <div className="product-grid">{visibleProducts.map((product, index) => <article className="product-card" key={product.id} style={{ animationDelay: `${Math.min(index * 35, 105)}ms` }}>
           <Gallery product={product} priority={index < 2} /><div className="product-info"><div><h3>{product.name}</h3><p>{product.description}</p></div><div className="product-price"><strong>{currency.format(product.priceCents / 100)}</strong><span className="stock-indicator">{product.stock} auf Lager</span></div></div>
           {(() => {
