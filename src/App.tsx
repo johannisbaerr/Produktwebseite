@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
 import type { DragEndEvent } from '@dnd-kit/core'
@@ -242,11 +242,16 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const [cart, setCart] = useState<CartItem[]>(readCart)
   const [addedProductId, setAddedProductId] = useState<number | null>(null)
   const [cartOpen, setCartOpen] = useState(false)
+  const [cartClosing, setCartClosing] = useState(false)
+  const [removingCartProductIds, setRemovingCartProductIds] = useState<number[]>([])
   const [clearCartPrompt, setClearCartPrompt] = useState(false)
   const [shareLink, setShareLink] = useState('')
   const [cartError, setCartError] = useState('')
   const categoryCardsRef = useRef<HTMLDivElement>(null)
   const addedProductTimer = useRef<number | null>(null)
+  const cartCloseTimer = useRef<number | null>(null)
+  const cartOpenRef = useRef(cartOpen)
+  const removalTimers = useRef(new Map<number, number>())
   const isFullCatalog = selectedCategory === 'all-products'
   const sortedCategories = useMemo(() => {
     const withAllProducts = categories.some((category) => category.id === 'all-products') ? categories : [...categories, allProductsCategory]
@@ -261,13 +266,30 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0)
   const cartTotal = cart.reduce((total, item) => total + item.quantity * (products.find((product) => product.id === item.productId)?.priceCents || 0), 0)
   const isCartHistoryEntry = () => isRecord(window.history.state) && window.history.state.amspindCart === true
+  const animateCartClose = useCallback(() => {
+    setCartClosing(true)
+    if (cartCloseTimer.current !== null) window.clearTimeout(cartCloseTimer.current)
+    cartCloseTimer.current = window.setTimeout(() => {
+      setCartOpen(false)
+      setCartClosing(false)
+      cartCloseTimer.current = null
+    }, 240)
+  }, [])
+  const animateCartCloseRef = useRef(animateCartClose)
+  useEffect(() => {
+    cartOpenRef.current = cartOpen
+    animateCartCloseRef.current = animateCartClose
+  }, [cartOpen, animateCartClose])
   const openCart = () => {
+    if (cartCloseTimer.current !== null) window.clearTimeout(cartCloseTimer.current)
+    cartCloseTimer.current = null
+    setCartClosing(false)
     if (!isCartHistoryEntry()) window.history.pushState({ ...(isRecord(window.history.state) ? window.history.state : {}), amspindCart: true }, '', window.location.href)
     setCartOpen(true)
   }
   const closeCart = () => {
     if (isCartHistoryEntry()) window.history.back()
-    else setCartOpen(false)
+    else animateCartClose()
   }
   const openAdminFromCart = () => {
     if (isCartHistoryEntry()) window.history.replaceState({ ...(isRecord(window.history.state) ? window.history.state : {}), amspindCart: false }, '', window.location.href)
@@ -276,7 +298,16 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   }
 
   useEffect(() => {
-    const syncCartWithHistory = () => setCartOpen(isCartHistoryEntry())
+    const syncCartWithHistory = () => {
+      if (isCartHistoryEntry()) {
+        if (cartCloseTimer.current !== null) window.clearTimeout(cartCloseTimer.current)
+        cartCloseTimer.current = null
+        setCartClosing(false)
+        setCartOpen(true)
+      } else if (cartOpenRef.current) {
+        animateCartCloseRef.current()
+      }
+    }
     window.addEventListener('popstate', syncCartWithHistory)
     return () => window.removeEventListener('popstate', syncCartWithHistory)
   }, [])
@@ -291,7 +322,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         if (isCartHistoryEntry()) window.history.back()
-        else setCartOpen(false)
+        else animateCartCloseRef.current()
       }
     }
     document.body.style.overflow = 'hidden'
@@ -350,6 +381,8 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   }, [cart])
   useEffect(() => () => {
     if (addedProductTimer.current !== null) window.clearTimeout(addedProductTimer.current)
+    if (cartCloseTimer.current !== null) window.clearTimeout(cartCloseTimer.current)
+    for (const timer of removalTimers.current.values()) window.clearTimeout(timer)
   }, [])
 
   const addToCart = (product: Product) => {
@@ -376,7 +409,13 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
     const product = products.find((item) => item.id === productId)
     if (quantity < 1) {
       setShareLink('')
-      setCart((items) => items.filter((item) => item.productId !== productId))
+      if (removalTimers.current.has(productId)) window.clearTimeout(removalTimers.current.get(productId))
+      setRemovingCartProductIds((current) => current.includes(productId) ? current : [...current, productId])
+      removalTimers.current.set(productId, window.setTimeout(() => {
+        setCart((items) => items.filter((item) => item.productId !== productId))
+        setRemovingCartProductIds((current) => current.filter((id) => id !== productId))
+        removalTimers.current.delete(productId)
+      }, 220))
       return
     }
     if (!product || quantity > product.stock) {
@@ -442,7 +481,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
             const quantity = cart.find((item) => item.productId === product.id)?.quantity || 0
             const atStockLimit = quantity >= product.stock
             return quantity > 0
-              ? <div className={`product-cart-actions ${addedProductId === product.id ? 'just-added' : ''}`} aria-live="polite">
+              ? <div className={`product-cart-actions ${addedProductId === product.id ? 'just-added' : ''} ${removingCartProductIds.includes(product.id) ? 'is-removing' : ''}`} aria-live="polite">
                 <span className="add-cart-button in-cart" role="status">Im Warenkorb{quantity > 1 ? ` · ${quantity}` : ''} ✓</span>
                 <button className="product-cart-icon-button" disabled={atStockLimit} title={atStockLimit ? 'Nicht genug auf Lager' : 'Weiteres Produkt hinzufügen'} aria-label={atStockLimit ? 'Nicht genug auf Lager' : 'Weiteres Produkt hinzufügen'} onClick={() => addToCart(product)}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
@@ -458,13 +497,13 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       </section>}
     </main>
     {!isFullCatalog && <footer><span>Amspind <small>Dein Spind, deine Auswahl.</small></span><span>© {new Date().getFullYear()}</span></footer>}
-    {cartOpen && <div className="cart-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCart() }}>{cartHeader}<section className="cart-panel" role="dialog" aria-modal="true" aria-labelledby="cart-title">
+    {cartOpen && <div className={`cart-backdrop ${cartClosing ? 'closing' : ''}`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeCart() }}>{cartHeader}<section className={`cart-panel ${cartClosing ? 'closing' : ''}`} role="dialog" aria-modal="true" aria-labelledby="cart-title">
       <div className="cart-page-title"><p className="eyebrow">Deine Auswahl</p><h2 id="cart-title">Warenkorb <span>({cartCount} Artikel)</span></h2></div>
       <div className="cart-page-content">
       <div className="cart-page-items">
       {cart.length === 0 ? <p className="muted">Dein Warenkorb ist noch leer.</p> : <div className="cart-items">{cart.map((item) => {
         const product = products.find((entry) => entry.id === item.productId)
-        return <article className="cart-item cart-page-item" key={item.productId}>
+        return <article className={`cart-item cart-page-item ${removingCartProductIds.includes(item.productId) ? 'is-removing' : ''}`} key={item.productId}>
           <div className="cart-product-image">{product?.images[0] && <img src={product.images[0].url} alt="" />}</div>
           <div className="cart-product-details"><strong>{product?.name || 'Produkt nicht mehr verfügbar'}</strong><small>{product ? currency.format(product.priceCents / 100) : 'Nicht verfügbar'}</small><span>{product ? `${product.stock} auf Lager` : 'Nicht mehr im Sortiment'}</span><div className="cart-item-actions"><div className="quantity-control"><button onClick={() => changeQuantity(item.productId, item.quantity - 1)} aria-label="Menge verringern">−</button><span>{item.quantity}</span><button disabled={!product || item.quantity >= product.stock} onClick={() => product && changeQuantity(item.productId, item.quantity + 1)} aria-label="Menge erhöhen">+</button></div><button className="delete-button" onClick={() => changeQuantity(item.productId, 0)}>Entfernen</button></div></div>
           <strong className="cart-line-total">{product ? currency.format(product.priceCents * item.quantity / 100) : '—'}</strong>
@@ -699,6 +738,7 @@ function CategoryManager({ products }: { products: Product[] }) {
 
 function ChangeNotes() {
   const entries = [
+    { date: '2026-10-20', title: 'Warenkorb und Suche flüssiger bedienbar', details: 'Der Warenkorb öffnet und schließt jetzt mit einem sanften Übergang. Suchergebnisse und Warenkorb-Schaltflächen erscheinen ruhiger; entfernte Artikel blenden sich kurz aus. Die Animationen respektieren die reduzierte Bewegung des Geräts.' },
     { date: '2026-10-20', title: 'Startseite und Warenkorb auf dem Handy verbessert', details: 'Kategorie-Karten stehen auf kleinen Displays zweispaltig und lassen sich vertikal durchscrollen. Produktbilder wechseln mit einer seitlichen Animation. Produkte können direkt in der Liste erhöht oder vollständig aus dem Warenkorb entfernt werden; nicht verfügbare weitere Stücke werden markiert.' },
     { date: '2026-10-20', title: 'Kategorie-Designs individuell anpassen', details: 'Im ausklappbaren Bereich „Größe, Rahmen & Farben“ lassen sich Größe, Rahmen und Farben jeder Kategorie einschließlich „Alle Produkte“ einstellen. Die Vorschau zeigt die Änderungen direkt.' },
     { date: '2026-10-20', title: 'Produktbilder gesammelt freistellen', details: 'Im Produktbereich können alle vorhandenen Produktbilder nacheinander lokal im Browser freigestellt werden. Erfolgreich bearbeitete Shop-Bilder werden ersetzt; Fehler einzelner Bilder bleiben sichtbar.' },
