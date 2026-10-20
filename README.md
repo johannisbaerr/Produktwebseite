@@ -20,8 +20,9 @@ Die Tabellen `products`, `product_images`, `admins` und `sessions` sowie der Sto
 3. `supabase/migrations/202610200001_category_design_settings.sql`
 4. `supabase/migrations/202610200002_category_product_order.sql`
 5. `supabase/migrations/202610200003_private_product_originals.sql`
+6. `supabase/migrations/202610200004_product_customizations.sql`
 
-Die Migrationen ergänzen Kategorien, Bestellungen, dynamische Suchbegriffe, Kategorie-Designoptionen, individuelle Produktsortierung je Kategorie, das einmalige Abbuchen der Bestellmengen und den privaten Speicher für Produktoriginale. Sie müssen vor dem Start der aktualisierten App ausgeführt werden. Fehlt Migration 003, bleiben die Kategorien mit Standarddesign verfügbar. Migration 004 wird benötigt, damit die Produktsortierung je Kategorie gespeichert werden kann. Migration 005 erstellt den privaten Supabase-Storage-Bucket für Originalbilder.
+Die Migrationen ergänzen Kategorien, Bestellungen, dynamische Suchbegriffe, Kategorie-Designoptionen, individuelle Produktsortierung je Kategorie, das einmalige Abbuchen der Bestellmengen, den privaten Speicher für Produktoriginale und Produkt-Anpassungen mit lagergeführten Extras. Sie müssen vor dem Start der aktualisierten App ausgeführt werden. Fehlt Migration 003, bleiben die Kategorien mit Standarddesign verfügbar. Migration 004 wird benötigt, damit die Produktsortierung je Kategorie gespeichert werden kann. Migration 005 erstellt den privaten Supabase-Storage-Bucket für Originalbilder. Migration 006 richtet Extras, Produktzuordnungen und das Abbuchen der Extra-Bestände ein.
 
 Wenn die öffentliche Seite meldet, dass Kategorien nicht geladen werden können, oder die Verwaltung trotz vorhandener Produkte einen Datenbankfehler anzeigt, öffne in Supabase den **SQL Editor** und führe alle Dateien aus `supabase/migrations/` der Reihe nach aus. Danach müssen die Änderungen am Server und an der Webseite veröffentlicht werden. Solange die Shop-Migration fehlt, kann die öffentliche Seite vorhandene Produkte weiterhin über „Alle Produkte“ anzeigen; die selbst verwalteten Kategorien benötigen die Migration.
 
@@ -32,6 +33,8 @@ Neue Produktbilder werden vor dem Upload im Browser mit dem lokal ausgeführten 
 Kategorie-Farbregler sind entfernt. Alle Kategorie-Karten verwenden das Standard-Farbschema von „Alle Produkte“ (heller Hintergrund, dunkle Schrift und dezenter Rahmen).
 
 Für jede Kategorie und „Alle Produkte“ lässt sich im Admin das Kartenlayout anpassen. Alle Karten verwenden dasselbe Farbschema wie „Alle Produkte“. Die Produktsortierung befindet sich innerhalb der jeweiligen Kategorie und wird separat gespeichert.
+
+Extras werden im Admin unter **Extras** angelegt und verwaltet. Sie sind nicht als eigene Produkte im öffentlichen Shop gelistet. In einem Produkt kann **Anpassungen anbieten** eingeschaltet und die gewünschten Extras ausgewählt werden. Im Shop öffnet **Anpassen** die Auswahl, inklusive „Nein danke“. Extra-Preise werden bei der Bestellung serverseitig übernommen; Produkt- und Extra-Lagerbestände werden beim späteren Abbuchen der Bestellung gemeinsam geprüft und reduziert.
 
 Bestelllinks enthalten einen zufälligen Zugriffsschlüssel. Die Produktdaten der Bestellung werden serverseitig als Momentaufnahme gespeichert und sind ausschließlich über eine aktive Admin-Sitzung abrufbar. Der Link allein gewährt keinen Einblick in die Bestellung.
 

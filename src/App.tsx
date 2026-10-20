@@ -9,17 +9,19 @@ import { removeImageBackground } from './removeImageBackground'
 import './App.css'
 
 type Image = { id: number; url: string; originalUrl?: string; originalName: string; backgroundRemoved?: boolean }
-type Product = { id: number; name: string; description: string; priceCents: number; stock: number; status: 'active' | 'unlisted'; searchTerms?: string[]; categoryIds?: string[]; images: Image[]; updatedAt: string }
+type Extra = { id: number; name: string; priceCents: number; stock: number }
+type Product = { id: number; name: string; description: string; priceCents: number; stock: number; status: 'active' | 'unlisted'; customizable?: boolean; extraOptions?: Extra[]; extraIds?: number[]; searchTerms?: string[]; categoryIds?: string[]; images: Image[]; updatedAt: string }
 type CategoryDesignSettings = { width: number; height: number; borderWidth: number; borderColor: string; backgroundColor: string; textColor: string }
 type Category = { id: string; name: string; sortOrder: number; design: string; designSettings: CategoryDesignSettings; previewMode: 'products' | 'upload'; previewImageUrl: string | null; productIds: number[] }
-type CartItem = { productId: number; quantity: number }
-type Order = { createdAt: string; fulfilledAt: string | null; items: { productId: number; name: string; priceCents: number; quantity: number }[] }
+type CartItem = { productId: number; quantity: number; extraIds: number[] }
+type Order = { createdAt: string; fulfilledAt: string | null; items: { productId: number; name: string; priceCents: number; quantity: number; extras?: { id: number; name: string; priceCents: number }[] }[] }
 
 const currency = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' })
 const emptyForm = { name: '', description: '', price: '', stock: '', status: 'active' as 'active' | 'unlisted', searchTerms: '' }
 const apiBaseUrl = import.meta.env.VITE_API_URL || 'https://shop-api-c4sq.onrender.com'
 const publicProductsCacheKey = `shop:public-products:${apiBaseUrl}`
 const cartStorageKey = 'amspind:cart'
+const cartLineKey = (productId: number, extraIds: number[] = []) => `${productId}:${[...extraIds].sort((a, b) => a - b).join(',')}`
 const defaultCategoryDesignSettings: CategoryDesignSettings = { width: 340, height: 465, borderWidth: 1, borderColor: '#d9e1e7', backgroundColor: '#f7f9fa', textColor: '#172a3c' }
 const categoryCardStyle = (settings: CategoryDesignSettings): CSSProperties => ({
   '--category-width': `${settings.width}px`,
@@ -69,19 +71,23 @@ function cachePublicProducts(products: Product[]) {
   }
 }
 
+const isStoredCartItem = (item: unknown): item is { productId: number; quantity: number; extraIds?: number[] } =>
+  isRecord(item) &&
+  typeof item.productId === 'number' &&
+  Number.isSafeInteger(item.productId) &&
+  item.productId > 0 &&
+  typeof item.quantity === 'number' &&
+  Number.isInteger(item.quantity) &&
+  item.quantity > 0 &&
+  item.quantity <= 99 &&
+  (item.extraIds === undefined || (Array.isArray(item.extraIds) && item.extraIds.every((id) => Number.isSafeInteger(id) && id > 0)))
+
 function readCart(): CartItem[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(cartStorageKey) || '[]')
-    return Array.isArray(value) ? value.filter((item): item is CartItem =>
-      isRecord(item) &&
-      typeof item.productId === 'number' &&
-      Number.isSafeInteger(item.productId) &&
-      item.productId > 0 &&
-      typeof item.quantity === 'number' &&
-      Number.isInteger(item.quantity) &&
-      item.quantity > 0 &&
-      item.quantity <= 99,
-    ) : []
+    return Array.isArray(value)
+      ? value.filter(isStoredCartItem).map(({ productId, quantity, extraIds }) => ({ productId, quantity, extraIds: [...new Set(extraIds || [])] }))
+      : []
   } catch {
     return []
   }
@@ -252,10 +258,12 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const [searchInput, setSearchInput] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('')
   const [cart, setCart] = useState<CartItem[]>(readCart)
+  const [customizingProduct, setCustomizingProduct] = useState<Product | null>(null)
+  const [selectedExtraIds, setSelectedExtraIds] = useState<number[]>([])
   const [addedProductId, setAddedProductId] = useState<number | null>(null)
   const [cartOpen, setCartOpen] = useState(false)
   const [cartClosing, setCartClosing] = useState(false)
-  const [removingCartProductIds, setRemovingCartProductIds] = useState<number[]>([])
+  const [removingCartProductIds, setRemovingCartProductIds] = useState<string[]>([])
   const [clearCartPrompt, setClearCartPrompt] = useState(false)
   const [shareLink, setShareLink] = useState('')
   const [cartError, setCartError] = useState('')
@@ -263,7 +271,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const addedProductTimer = useRef<number | null>(null)
   const cartCloseTimer = useRef<number | null>(null)
   const cartOpenRef = useRef(cartOpen)
-  const removalTimers = useRef(new Map<number, number>())
+  const removalTimers = useRef(new Map<string, number>())
   const isFullCatalog = selectedCategory === 'all-products'
   const sortedCategories = useMemo(() => {
     const withAllProducts = categories.some((category) => category.id === 'all-products') ? categories : [...categories, allProductsCategory]
@@ -280,7 +288,11 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
     }).sort((left, right) => (positions.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (positions.get(right.id) ?? Number.MAX_SAFE_INTEGER))
   }, [products, search, selectedCategory, sortedCategories])
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0)
-  const cartTotal = cart.reduce((total, item) => total + item.quantity * (products.find((product) => product.id === item.productId)?.priceCents || 0), 0)
+  const cartTotal = cart.reduce((total, item) => {
+    const product = products.find((entry) => entry.id === item.productId)
+    const extrasTotal = item.extraIds.reduce((sum, id) => sum + (product?.extraOptions?.find((extra) => extra.id === id)?.priceCents || 0), 0)
+    return total + item.quantity * ((product?.priceCents || 0) + extrasTotal)
+  }, 0)
   const isCartHistoryEntry = () => isRecord(window.history.state) && window.history.state.amspindCart === true
   const currentHistoryState = () => isRecord(window.history.state) ? window.history.state : {}
   const saveCurrentViewToHistory = (view: { search: string; category: string; cart: boolean }) => {
@@ -460,46 +472,63 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
     for (const timer of removalTimers.current.values()) window.clearTimeout(timer)
   }, [])
 
-  const addToCart = (product: Product) => {
-    const existing = cart.find((item) => item.productId === product.id)
-    if ((existing?.quantity || 0) >= product.stock) {
+  const addToCart = (product: Product, selectedExtras: number[] = []) => {
+    const extraIds = [...new Set(selectedExtras)].sort((a, b) => a - b)
+    const currentProductQuantity = cart.filter((item) => item.productId === product.id).reduce((total, item) => total + item.quantity, 0)
+    if (currentProductQuantity >= product.stock) {
       setCartError(`Nicht genug auf Lager: ${product.name}`)
-      return
+      return false
+    }
+    const extra = extraIds.map((id) => product.extraOptions?.find((entry) => entry.id === id)).find((entry) => !entry || entry.stock < cart.filter((item) => item.extraIds.includes(entry.id)).reduce((total, item) => total + item.quantity, 0) + 1)
+    if (extra !== undefined || extraIds.some((id) => !product.extraOptions?.some((entry) => entry.id === id))) {
+      setCartError(!extra ? 'Ein ausgewähltes Extra ist nicht mehr verfügbar.' : extra.stock <= 0 ? `„${extra.name}“ ist derzeit nicht verfügbar.` : `Nicht genug „${extra.name}“ auf Lager.`)
+      return false
     }
     setCartError('')
     setShareLink('')
     setCart((items) => {
-      const existing = items.find((item) => item.productId === product.id)
-      if ((existing?.quantity || 0) >= product.stock) return items
+      if (items.filter((item) => item.productId === product.id).reduce((total, item) => total + item.quantity, 0) >= product.stock) return items
+      const existing = items.find((item) => cartLineKey(item.productId, item.extraIds) === cartLineKey(product.id, extraIds))
       return existing
-        ? items.map((item) => item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item)
-        : [...items, { productId: product.id, quantity: 1 }]
+        ? items.map((item) => cartLineKey(item.productId, item.extraIds) === cartLineKey(product.id, extraIds) ? { ...item, quantity: item.quantity + 1 } : item)
+        : [...items, { productId: product.id, quantity: 1, extraIds }]
     })
     setAddedProductId(product.id)
     if (addedProductTimer.current !== null) window.clearTimeout(addedProductTimer.current)
     addedProductTimer.current = window.setTimeout(() => setAddedProductId(null), 700)
+    return true
   }
 
-  const changeQuantity = (productId: number, quantity: number) => {
+  const changeQuantity = (productId: number, extraIds: number[], quantity: number) => {
+    const lineId = cartLineKey(productId, extraIds)
     const product = products.find((item) => item.id === productId)
     if (quantity < 1) {
       setShareLink('')
-      if (removalTimers.current.has(productId)) window.clearTimeout(removalTimers.current.get(productId))
-      setRemovingCartProductIds((current) => current.includes(productId) ? current : [...current, productId])
-      removalTimers.current.set(productId, window.setTimeout(() => {
-        setCart((items) => items.filter((item) => item.productId !== productId))
-        setRemovingCartProductIds((current) => current.filter((id) => id !== productId))
-        removalTimers.current.delete(productId)
+      if (removalTimers.current.has(lineId)) window.clearTimeout(removalTimers.current.get(lineId))
+      setRemovingCartProductIds((current) => current.includes(lineId) ? current : [...current, lineId])
+      removalTimers.current.set(lineId, window.setTimeout(() => {
+        setCart((items) => items.filter((item) => cartLineKey(item.productId, item.extraIds) !== lineId))
+        setRemovingCartProductIds((current) => current.filter((id) => id !== lineId))
+        removalTimers.current.delete(lineId)
       }, 220))
       return
     }
-    if (!product || quantity > product.stock) {
+    const otherProductQuantity = cart.filter((item) => item.productId === productId && cartLineKey(item.productId, item.extraIds) !== lineId).reduce((total, item) => total + item.quantity, 0)
+    if (!product || quantity + otherProductQuantity > product.stock) {
       setCartError('Die verfügbare Stückzahl wurde erreicht.')
       return
     }
+    for (const id of extraIds) {
+      const extra = product.extraOptions?.find((entry) => entry.id === id)
+      const otherExtraQuantity = cart.filter((item) => item.extraIds.includes(id) && cartLineKey(item.productId, item.extraIds) !== lineId).reduce((total, item) => total + item.quantity, 0)
+      if (!extra || quantity + otherExtraQuantity > extra.stock) {
+        setCartError(`Der Bestand von „${extra?.name || 'einem Extra'}“ reicht nicht aus.`)
+        return
+      }
+    }
     setCartError('')
     setShareLink('')
-    setCart((items) => items.map((item) => item.productId === productId ? { ...item, quantity } : item))
+    setCart((items) => items.map((item) => cartLineKey(item.productId, item.extraIds) === lineId ? { ...item, quantity } : item))
   }
 
   const createShareableOrder = async () => {
@@ -507,7 +536,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
     try {
       let link = shareLink
       if (!link) {
-        const result = await request<{ token: string }>('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: cart.map(({ productId, quantity }) => ({ productId, quantity })) }) })
+        const result = await request<{ token: string }>('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: cart.map(({ productId, quantity, extraIds }) => ({ productId, quantity, extraIds })) }) })
         const url = new URL(window.location.href)
         url.search = `?order=${encodeURIComponent(result.token)}`
         url.hash = ''
@@ -555,12 +584,17 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
         {loading ? <div className="loading">Produkte werden geladen ...</div> : loadError ? <div className="loading" role="alert">{loadError}</div> : visibleProducts.length === 0 ? <div className="empty-public"><span>○</span><h3>{search ? 'Keine passenden Produkte gefunden' : 'Demnächst hier'}</h3><p>{search ? 'Versuche einen anderen Suchbegriff.' : 'Diese Auswahl wird gerade vorbereitet.'}</p></div> : <div className="product-grid">{visibleProducts.map((product, index) => <article className="product-card" key={product.id} style={{ animationDelay: `${Math.min(index * 35, 105)}ms` }}>
           <Gallery product={product} priority={index < 2} /><div className="product-info"><div><h3>{product.name}</h3><p>{product.description}</p></div><div className="product-price"><strong>{currency.format(product.priceCents / 100)}</strong><span className="stock-indicator">{product.stock} auf Lager</span></div></div>
           {(() => {
-            const quantity = cart.find((item) => item.productId === product.id)?.quantity || 0
+            const quantity = cart.filter((item) => item.productId === product.id).reduce((total, item) => total + item.quantity, 0)
             const atStockLimit = quantity >= product.stock
+            const defaultLineId = cartLineKey(product.id)
+            if (product.customizable) return <div className="customizable-product-action">
+              <button className="add-cart-button" disabled={product.stock <= 0} onClick={() => { setSelectedExtraIds([]); setCustomizingProduct(product) }}>{product.stock > 0 ? 'Anpassen' : 'Nicht genug auf Lager'}</button>
+              {quantity > 0 && <small>Im Warenkorb: {quantity}</small>}
+            </div>
             return quantity > 0
-              ? <div className={`product-cart-actions ${addedProductId === product.id ? 'just-added' : ''} ${removingCartProductIds.includes(product.id) ? 'is-removing' : ''}`} aria-live="polite">
+              ? <div className={`product-cart-actions ${addedProductId === product.id ? 'just-added' : ''} ${removingCartProductIds.includes(defaultLineId) ? 'is-removing' : ''}`} aria-live="polite">
                 <span className="add-cart-button in-cart" role="status">Im Warenkorb{quantity > 1 ? ` · ${quantity}` : ''} ✓</span>
-                <button className="product-cart-icon-button remove-from-cart" title={quantity > 1 ? 'Ein Stück entfernen' : 'Aus dem Warenkorb entfernen'} aria-label={quantity > 1 ? 'Ein Stück entfernen' : 'Aus dem Warenkorb entfernen'} onClick={() => changeQuantity(product.id, quantity > 1 ? quantity - 1 : 0)}>
+                <button className="product-cart-icon-button remove-from-cart" title={quantity > 1 ? 'Ein Stück entfernen' : 'Aus dem Warenkorb entfernen'} aria-label={quantity > 1 ? 'Ein Stück entfernen' : 'Aus dem Warenkorb entfernen'} onClick={() => changeQuantity(product.id, [], quantity > 1 ? quantity - 1 : 0)}>
                   {quantity > 1 ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg>}
                 </button>
                 <button className="product-cart-icon-button" disabled={atStockLimit} title={atStockLimit ? 'Nicht genug auf Lager' : 'Weiteres Produkt hinzufügen'} aria-label={atStockLimit ? 'Nicht genug auf Lager' : 'Weiteres Produkt hinzufügen'} onClick={() => addToCart(product)}>
@@ -580,10 +614,13 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       <div className="cart-page-items">
       {cart.length === 0 ? <p className="muted">Dein Warenkorb ist noch leer.</p> : <div className="cart-items">{cart.map((item) => {
         const product = products.find((entry) => entry.id === item.productId)
-        return <article className={`cart-item cart-page-item ${removingCartProductIds.includes(item.productId) ? 'is-removing' : ''}`} key={item.productId}>
+        const lineId = cartLineKey(item.productId, item.extraIds)
+        const selectedExtras = item.extraIds.map((id) => product?.extraOptions?.find((extra) => extra.id === id)).filter((extra): extra is Extra => Boolean(extra))
+        const unitPrice = (product?.priceCents || 0) + selectedExtras.reduce((sum, extra) => sum + extra.priceCents, 0)
+        return <article className={`cart-item cart-page-item ${removingCartProductIds.includes(lineId) ? 'is-removing' : ''}`} key={lineId}>
           <div className="cart-product-image">{product?.images[0] && <img src={product.images[0].url} alt="" />}</div>
-          <div className="cart-product-details"><strong>{product?.name || 'Produkt nicht mehr verfügbar'}</strong><small>{product ? currency.format(product.priceCents / 100) : 'Nicht verfügbar'}</small><span>{product ? `${product.stock} auf Lager` : 'Nicht mehr im Sortiment'}</span><div className="cart-item-actions"><div className="quantity-control"><button onClick={() => changeQuantity(item.productId, item.quantity - 1)} aria-label="Menge verringern">−</button><span>{item.quantity}</span><button disabled={!product || item.quantity >= product.stock} onClick={() => product && changeQuantity(item.productId, item.quantity + 1)} aria-label="Menge erhöhen">+</button></div><button className="delete-button" onClick={() => changeQuantity(item.productId, 0)}>Entfernen</button></div></div>
-          <strong className="cart-line-total">{product ? currency.format(product.priceCents * item.quantity / 100) : '—'}</strong>
+          <div className="cart-product-details"><strong>{product?.name || 'Produkt nicht mehr verfügbar'}</strong><small>{product ? currency.format(product.priceCents / 100) : 'Nicht verfügbar'}</small>{selectedExtras.length > 0 && <ul className="cart-extra-list">{selectedExtras.map((extra) => <li key={extra.id}>+ {extra.name} · {currency.format(extra.priceCents / 100)}</li>)}</ul>}<span>{product ? `${product.stock} auf Lager` : 'Nicht mehr im Sortiment'}</span><div className="cart-item-actions"><div className="quantity-control"><button onClick={() => changeQuantity(item.productId, item.extraIds, item.quantity - 1)} aria-label="Menge verringern">−</button><span>{item.quantity}</span><button disabled={!product || cart.filter((entry) => entry.productId === item.productId).reduce((total, entry) => total + entry.quantity, 0) >= product.stock || selectedExtras.some((extra) => cart.filter((entry) => entry.extraIds.includes(extra.id)).reduce((total, entry) => total + entry.quantity, 0) >= extra.stock)} onClick={() => product && changeQuantity(item.productId, item.extraIds, item.quantity + 1)} aria-label="Menge erhöhen">+</button></div><button className="delete-button" onClick={() => changeQuantity(item.productId, item.extraIds, 0)}>Entfernen</button></div></div>
+          <strong className="cart-line-total">{product ? currency.format(unitPrice * item.quantity / 100) : '—'}</strong>
         </article>
       })}</div>}
       </div>
@@ -596,11 +633,13 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       </div>
     </section></div>}
     {clearCartPrompt && <div className="modal-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="clear-cart-title"><h2 id="clear-cart-title">Möchtest du deinen Warenkorb leeren?</h2><div><button className="primary-button" onClick={() => { setCart([]); setShareLink(''); setClearCartPrompt(false) }}>Ja</button><button className="secondary-button" onClick={() => setClearCartPrompt(false)}>Nein</button></div></section></div>}
+    {customizingProduct && <div className="modal-backdrop customization-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCustomizingProduct(null) }}><section className="customization-dialog" role="dialog" aria-modal="true" aria-labelledby="customization-title"><button type="button" className="icon-button customization-close" aria-label="Schließen" onClick={() => setCustomizingProduct(null)}>×</button><p className="eyebrow">Deine Auswahl</p><h2 id="customization-title">{customizingProduct.name} anpassen</h2><p className="muted">Möchtest du Extras dazunehmen?</p><div className="customization-options">{(customizingProduct.extraOptions || []).map((extra) => <label className={`customization-option ${extra.stock <= 0 ? 'unavailable' : ''}`} key={extra.id}><input type="checkbox" checked={selectedExtraIds.includes(extra.id)} disabled={extra.stock <= 0} onChange={(event) => setSelectedExtraIds((current) => event.target.checked ? [...current, extra.id] : current.filter((id) => id !== extra.id))} /><span><strong>{extra.name}</strong><small>{extra.stock > 0 ? `${extra.stock} verfügbar` : 'Derzeit nicht verfügbar'}</small></span><b>{currency.format(extra.priceCents / 100)}</b></label>)}</div><div className="customization-actions"><button className="secondary-button" onClick={() => { if (addToCart(customizingProduct, [])) setCustomizingProduct(null) }}>Nein danke</button><button className="primary-button" disabled={selectedExtraIds.length === 0 || selectedExtraIds.some((id) => !(customizingProduct.extraOptions || []).some((extra) => extra.id === id && extra.stock > 0))} onClick={() => { if (addToCart(customizingProduct, selectedExtraIds)) setCustomizingProduct(null) }}>Mit Extras hinzufügen</button></div></section></div>}
   </div>
 }
 
-function ProductForm({ product, onSaved, onCancel, onRefreshBackground, backgroundBusy = false }: { product?: Product; onSaved: () => void; onCancel?: () => void; onRefreshBackground?: (product: Product) => Promise<void>; backgroundBusy?: boolean }) {
-  const [form, setForm] = useState(product ? { name: product.name, description: product.description, price: (product.priceCents / 100).toFixed(2).replace('.', ','), stock: String(product.stock), status: product.status, searchTerms: (product.searchTerms || []).join(', ') } : emptyForm)
+function ProductForm({ product, extras, onSaved, onCancel, onRefreshBackground, backgroundBusy = false }: { product?: Product; extras: Extra[]; onSaved: () => void; onCancel?: () => void; onRefreshBackground?: (product: Product) => Promise<void>; backgroundBusy?: boolean }) {
+  const [form, setForm] = useState(product ? { name: product.name, description: product.description, price: (product.priceCents / 100).toFixed(2).replace('.', ','), stock: String(product.stock), status: product.status, searchTerms: (product.searchTerms || []).join(', '), customizable: product.customizable === true } : { ...emptyForm, customizable: false })
+  const [selectedExtraIds, setSelectedExtraIds] = useState<number[]>(product?.extraIds || [])
   const [files, setFiles] = useState<FileList | null>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -621,6 +660,8 @@ function ProductForm({ product, onSaved, onCancel, onRefreshBackground, backgrou
     data.append('priceCents', String(Math.round(priceValue * 100)))
     data.append('stock', form.stock)
     data.append('status', form.status)
+    data.append('customizable', String(form.customizable))
+    data.append('extraIds', JSON.stringify(form.customizable ? selectedExtraIds : []))
     try {
       if (files) {
         const selectedFiles = Array.from(files)
@@ -645,10 +686,98 @@ function ProductForm({ product, onSaved, onCancel, onRefreshBackground, backgrou
     <label>Zusätzliche Suchbegriffe<input value={form.searchTerms} onChange={(e) => setForm({ ...form, searchTerms: e.target.value })} placeholder="z. B. süß, Getränk, Apfel" /><small>Kommagetrennte Begriffe helfen bei Synonymen und Schreibvarianten. Sie sind direkt am Produkt gespeichert.</small></label>
     <div className="form-row"><label>Preis in EUR<input required inputMode="decimal" min="0" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="0,00" /></label><label>Lagerbestand<input required type="number" min="0" step="1" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} placeholder="0" /></label></div>
     <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as 'active' | 'unlisted' })}><option value="active">Aktiv gelistet</option><option value="unlisted">Nicht gelistet</option></select></label>
+    <section className="product-customization-settings"><label className="toggle-option"><input type="checkbox" checked={form.customizable} onChange={(event) => setForm((current) => ({ ...current, customizable: event.target.checked }))} /><span><strong>Anpassungen anbieten</strong><small>Besucher können vor dem Hinzufügen Extras auswählen.</small></span></label>{form.customizable && <fieldset className="product-extra-picker"><legend>Wählbare Extras</legend>{extras.length ? extras.map((extra) => <label className={`product-choice ${extra.stock <= 0 ? 'extra-out-of-stock' : ''}`} key={extra.id}><input type="checkbox" checked={selectedExtraIds.includes(extra.id)} onChange={(event) => setSelectedExtraIds((current) => event.target.checked ? [...current, extra.id] : current.filter((id) => id !== extra.id))} /><span>{extra.name} <small>· {currency.format(extra.priceCents / 100)} · {extra.stock} auf Lager</small></span></label>) : <p className="muted">Lege zuerst im Admin-Bereich unter „Extras“ mindestens ein Extra an.</p>}</fieldset>}</section>
     <label className="file-drop">Produktbilder{product && <small>Bestehende Bilder bleiben erhalten. Neue Dateien werden ergänzt.</small>}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required={!product} onChange={(e) => setFiles(e.target.files)} /><span>{files?.length ? `${files.length} Bild(er) ausgewählt` : 'Bilder auswählen oder hierher ziehen'}</span><small className="background-removal-note">Das Original bleibt dauerhaft erhalten; die Freistellung wird als Shop-Bild gespeichert. Beim ersten Mal wird das KI-Modell (ca. 46 MB) geladen.</small></label>
     {product && onRefreshBackground && <button type="button" className="secondary-button" disabled={saving || backgroundBusy} onClick={() => { void onRefreshBackground(product) }}>{backgroundBusy ? 'Freistellung wird aktualisiert ...' : 'Bilder-Freistellung aktualisieren'}</button>}
     {error && <div className="form-error">{error}</div>}<button className="primary-button" disabled={saving} aria-busy={saving}>{saving && <span className="button-spinner" aria-hidden="true" />} {saving ? processingStatus || 'Wird gespeichert ...' : product ? 'Änderungen speichern' : 'Produkt veröffentlichen'}</button>
   </form>
+}
+
+function ExtraAdminRow({ extra, onSaved, onDeleted }: { extra: Extra; onSaved: (extra: Extra) => void; onDeleted: (id: number) => void }) {
+  const [name, setName] = useState(extra.name)
+  const [price, setPrice] = useState((extra.priceCents / 100).toFixed(2).replace('.', ','))
+  const [stock, setStock] = useState(String(extra.stock))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const save = async (event: FormEvent) => {
+    event.preventDefault()
+    const priceValue = Number(price.replace(',', '.'))
+    const stockValue = Number(stock)
+    if (!name.trim() || !Number.isFinite(priceValue) || priceValue < 0 || !Number.isInteger(stockValue) || stockValue < 0) {
+      setError('Bitte Name, gültigen Preis und Lagerbestand eingeben.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const updated = await request<Extra>(`/api/admin/extras/${extra.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), priceCents: Math.round(priceValue * 100), stock: stockValue }) })
+      onSaved(updated)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Extra konnte nicht gespeichert werden.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const remove = async () => {
+    if (!window.confirm(`Extra „${extra.name}“ löschen? Es wird auch aus den Produkt-Anpassungen entfernt.`)) return
+    setBusy(true)
+    setError('')
+    try {
+      await request(`/api/admin/extras/${extra.id}`, { method: 'DELETE' })
+      onDeleted(extra.id)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Extra konnte nicht gelöscht werden.')
+      setBusy(false)
+    }
+  }
+  return <form className="extra-admin-row" onSubmit={(event) => { void save(event) }}>
+    <label>Extra-Name<input value={name} disabled={busy} maxLength={160} onChange={(event) => setName(event.target.value)} /></label>
+    <label>Preis (EUR)<input inputMode="decimal" value={price} disabled={busy} onChange={(event) => setPrice(event.target.value)} /></label>
+    <label>Lagerbestand<input type="number" min="0" step="1" value={stock} disabled={busy} onChange={(event) => setStock(event.target.value)} /></label>
+    <div className="extra-admin-actions"><button className="secondary-button" disabled={busy} aria-busy={busy}>{busy && <span className="button-spinner" aria-hidden="true" />} Speichern</button><button type="button" className="delete-button" disabled={busy} onClick={() => { void remove() }}>{busy ? 'Wird verarbeitet ...' : 'Löschen'}</button></div>
+    {error && <div className="form-error" role="alert">{error}</div>}
+  </form>
+}
+
+function ExtrasManager({ extras, onChange }: { extras: Extra[]; onChange: (extras: Extra[]) => void }) {
+  const [name, setName] = useState('')
+  const [price, setPrice] = useState('')
+  const [stock, setStock] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const create = async (event: FormEvent) => {
+    event.preventDefault()
+    const priceValue = Number(price.replace(',', '.'))
+    const stockValue = Number(stock)
+    if (!name.trim() || !Number.isFinite(priceValue) || priceValue < 0 || !Number.isInteger(stockValue) || stockValue < 0) {
+      setError('Bitte Name, gültigen Preis und Lagerbestand eingeben.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const extra = await request<Extra>('/api/admin/extras', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), priceCents: Math.round(priceValue * 100), stock: stockValue }) })
+      onChange([...extras, extra].sort((left, right) => left.name.localeCompare(right.name, 'de')))
+      setName('')
+      setPrice('')
+      setStock('')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Extra konnte nicht angelegt werden.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <section className="admin-section extras-manager">
+    <p className="reorder-hint">Extras sind nicht einzeln im Shop sichtbar. Sie erscheinen nur bei Produkten, für die du „Anpassungen anbieten“ aktivierst.</p>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    <form className="extra-create-form" onSubmit={(event) => { void create(event) }}>
+      <label>Extra-Name<input value={name} disabled={busy} maxLength={160} required placeholder="z. B. Knoblauchpulver" onChange={(event) => setName(event.target.value)} /></label>
+      <label>Preis (EUR)<input inputMode="decimal" value={price} disabled={busy} required placeholder="0,50" onChange={(event) => setPrice(event.target.value)} /></label>
+      <label>Lagerbestand<input type="number" min="0" step="1" value={stock} disabled={busy} required placeholder="20" onChange={(event) => setStock(event.target.value)} /></label>
+      <button className="primary-button" disabled={busy} aria-busy={busy}>{busy && <span className="button-spinner" aria-hidden="true" />} {busy ? 'Wird angelegt ...' : 'Extra hinzufügen'}</button>
+    </form>
+    <div className="extras-admin-list">{extras.map((extra) => <ExtraAdminRow key={extra.id} extra={extra} onSaved={(updated) => onChange(extras.map((entry) => entry.id === updated.id ? updated : entry).sort((left, right) => left.name.localeCompare(right.name, 'de')))} onDeleted={(id) => onChange(extras.filter((entry) => entry.id !== id))} />)}{extras.length === 0 && <div className="admin-empty">Noch keine Extras angelegt.</div>}</div>
+  </section>
 }
 
 function SortableProduct({ product, disabled, onEdit, onDelete, showDragHandle = true, deleting = false }: { product: Product; disabled: boolean; onEdit?: () => void; onDelete?: () => void; showDragHandle?: boolean; deleting?: boolean }) {
@@ -656,7 +785,7 @@ function SortableProduct({ product, disabled, onEdit, onDelete, showDragHandle =
   return <article ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={`admin-product ${isDragging ? 'is-dragging' : ''} ${isOver ? 'is-drop-target' : ''}`}>
     {showDragHandle && <button className="drag-handle" type="button" disabled={disabled} aria-label={`${product.name} ziehen, um die Position zu ändern`} {...attributes} {...listeners}>⠿</button>}
     <div className="admin-thumb">{product.images[0] && <img src={product.images[0].url} alt="" />}</div>
-    <div className="admin-product-main"><div className="admin-product-title"><h3>{product.name}</h3><span className={`status ${product.status}`}>{product.status === 'active' && product.stock > 0 ? 'Aktiv' : 'Nicht gelistet'}</span></div><p>{product.description}</p><span className="admin-meta">{currency.format(product.priceCents / 100)} · {product.stock} auf Lager · {product.images.length} Bilder</span></div>
+    <div className="admin-product-main"><div className="admin-product-title"><h3>{product.name}</h3><span className={`status ${product.status}`}>{product.status === 'active' && product.stock > 0 ? 'Aktiv' : 'Nicht gelistet'}</span></div><p>{product.description}</p><span className="admin-meta">{currency.format(product.priceCents / 100)} · {product.stock} auf Lager · {product.images.length} Bilder{product.customizable ? ' · Anpassungen' : ''}</span></div>
     {onEdit && onDelete && <div className="admin-product-actions"><button className="edit-button" disabled={deleting} onClick={onEdit}>Bearbeiten <span>↗</span></button><button className="delete-button" disabled={deleting} aria-busy={deleting} onClick={onDelete}>{deleting && <span className="button-spinner" aria-hidden="true" />} {deleting ? 'Wird gelöscht ...' : 'Löschen'}</button></div>}
   </article>
 }
@@ -858,6 +987,7 @@ function CategoryManager({ products, onReorderProducts }: { products: Product[];
 
 function ChangeNotes() {
   const entries = [
+    { date: '2026-10-20', title: 'Produkte mit Extras anpassbar machen', details: 'Extras werden im Admin-Bereich separat verwaltet und bleiben aus dem öffentlichen Katalog ausgeblendet. Für ausgewählte Produkte können Extras angeboten werden; Käufer fügen diese über „Anpassen“ optional hinzu. Extra-Preise, Warenkorb und Lagerabbuchung werden bei Bestellungen berücksichtigt.' },
     { date: '2026-10-20', title: 'Originalbilder und Admin-Rückmeldungen verbessert', details: 'Neue Produkt-Originale werden privat gespeichert und bei jeder Freistellung erneut als Quelle verwendet. Lösch- und Speicheraktionen zeigen jetzt direkt im jeweiligen Button, wenn sie noch laufen. Alle Kategorien verwenden jetzt das einheitliche Farbschema von „Alle Produkte“.' },
     { date: '2026-10-20', title: 'Kategorieverwaltung und Produktbilder verbessert', details: 'Der Kategorienfehler wurde in der API korrigiert. Produktsortierungen werden je Kategorie verwaltet, Bilder lassen sich einzeln löschen und die Freistellung läuft im Hintergrund, damit die Seite bedienbar bleibt. Die Warenkorb-Minus- und Plus-Buttons sind getauscht; Kategoriegrößen und Rahmenoptionen sind aus der Verwaltung entfernt.' },
     { date: '2026-10-20', title: 'Warenkorb und Suche flüssiger bedienbar', details: 'Der Warenkorb öffnet und schließt jetzt mit einem sanften Übergang. Suchergebnisse und Warenkorb-Schaltflächen erscheinen ruhiger; entfernte Artikel blenden sich kurz aus. Die Animationen respektieren die reduzierte Bewegung des Geräts.' },
@@ -923,7 +1053,7 @@ function OrderDetails({ token }: { token: string }) {
   }
   if (error && !order) return <div className="admin-empty" role="alert">{error}</div>
   if (!order) return <div className="admin-loading">Bestellung wird geladen ...</div>
-  return <section className="order-details"><p className="eyebrow">Geteilte Bestellung</p><h1>Bestellung ansehen</h1><p className="muted">{new Date(order.createdAt).toLocaleString('de-DE')}</p>{order.items.map((item) => <div className="cart-item" key={item.productId}><strong>{item.name}</strong><span>{item.quantity} × {currency.format(item.priceCents / 100)}</span><strong>{currency.format(item.quantity * item.priceCents / 100)}</strong></div>)}<div className="cart-total"><strong>Gesamt</strong><strong>{currency.format(order.items.reduce((total, item) => total + item.quantity * item.priceCents, 0) / 100)}</strong></div>
+  return <section className="order-details"><p className="eyebrow">Geteilte Bestellung</p><h1>Bestellung ansehen</h1><p className="muted">{new Date(order.createdAt).toLocaleString('de-DE')}</p>{order.items.map((item, index) => { const unitPrice = item.priceCents + (item.extras || []).reduce((sum, extra) => sum + extra.priceCents, 0); return <div className="cart-item" key={`${item.productId}:${index}`}><div><strong>{item.name}</strong>{(item.extras || []).map((extra) => <small key={extra.id}>+ {extra.name} · {currency.format(extra.priceCents / 100)}</small>)}</div><span>{item.quantity} × {currency.format(unitPrice / 100)}</span><strong>{currency.format(item.quantity * unitPrice / 100)}</strong></div> })}<div className="cart-total"><strong>Gesamt</strong><strong>{currency.format(order.items.reduce((total, item) => total + item.quantity * (item.priceCents + (item.extras || []).reduce((sum, extra) => sum + extra.priceCents, 0)), 0) / 100)}</strong></div>
     {order.fulfilledAt
       ? <p className="order-stock-status" role="status">Bestand wurde am {new Date(order.fulfilledAt).toLocaleString('de-DE')} abgezogen.</p>
       : <div className="order-stock-actions">{error && !confirmDeduction && <div className="form-error" role="alert">{error}</div>}<p className="muted">{hasAnswered ? 'Der Lagerbestand wurde nicht verändert.' : 'Der Lagerbestand wurde noch nicht verändert.'}</p><button className="primary-button" disabled={deducting} onClick={() => { setError(''); setConfirmDeduction(true) }}>Bestand jetzt abziehen</button></div>}
@@ -935,6 +1065,7 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null)
   const [products, setProducts] = useState<Product[]>([])
   const [allProducts, setAllProducts] = useState<Product[]>([])
+  const [extras, setExtras] = useState<Extra[]>([])
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<Product | 'new' | null>(null)
   const [loginError, setLoginError] = useState('')
@@ -966,6 +1097,12 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
     void load().catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Produkte konnten nicht geladen werden.'))
     void loadAllProducts()
   }, [loggedIn, search])
+  useEffect(() => {
+    if (!loggedIn) return
+    request<Extra[]>('/api/admin/extras')
+      .then(setExtras)
+      .catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Extras konnten nicht geladen werden.'))
+  }, [loggedIn])
   if (loggedIn === null) return <div className="admin-loading">Lade ...</div>
   if (!loggedIn) return <div className="login-page"><button className="back-link" onClick={onExit}>← Zur öffentlichen Seite</button><div className="login-box"><span className="login-symbol">Amspind</span><p className="eyebrow">Produktverwaltung</p><h1>Admin-Anmeldung</h1><p className="login-intro">{orderToken ? 'Diese Bestellung ist nur nach Admin-Anmeldung sichtbar.' : 'Melde dich an, um Produkte und Kategorien zu verwalten.'}</p><form onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); try { await request('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: form.get('username'), password: form.get('password') }) }); setLoggedIn(true) } catch (e) { setLoginError(e instanceof Error ? e.message : 'Login fehlgeschlagen.') } }}><label>Benutzername<input name="username" required defaultValue="admin" /></label><label className="password-field">Passwort<div className="password-input-wrap"><input name="password" type={showPassword ? 'text' : 'password'} required /><button type="button" className="password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Passwort verbergen' : 'Passwort anzeigen'}>{showPassword ? '🙈' : '👁'}</button></div></label>{loginError && <div className="form-error">{loginError}</div>}<button className="primary-button">Anmelden <span>↗</span></button></form><p className="login-note">Nur für den internen Gebrauch.</p></div></div>
   const deleteProduct = async (product: Product) => {
@@ -1069,10 +1206,14 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
           </DndContext>
         </section>
         </details>
+        <details className="admin-accordion extras-accordion">
+          <summary><span className="accordion-summary-copy"><strong>Extras</strong><small>{extras.length} Extras · nur als Produkt-Anpassung im Shop verfügbar</small></span></summary>
+          <ExtrasManager extras={extras} onChange={setExtras} />
+        </details>
         <ChangeNotes />
       </>}
     </main>
-    {editing && <div className="modal-backdrop"><div className="modal"><ProductForm product={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onRefreshBackground={refreshProductBackground} backgroundBusy={Boolean(backgroundJob?.running)} onSaved={() => { setEditing(null); void load(); void loadAllProducts() }} />{editing !== 'new' && <div className="existing-images"><p className="eyebrow">Bilder verwalten</p>{imageActionError && <div className="form-error" role="alert">{imageActionError}</div>}<Gallery product={editing} admin deletingImageId={deletingImageId} onDeleteImage={(imageId) => { void deleteProductImage(imageId) }} /></div>}</div></div>}
+    {editing && <div className="modal-backdrop"><div className="modal"><ProductForm key={editing === 'new' ? 'new' : editing.id} product={editing === 'new' ? undefined : editing} extras={extras} onCancel={() => setEditing(null)} onRefreshBackground={refreshProductBackground} backgroundBusy={Boolean(backgroundJob?.running)} onSaved={() => { setEditing(null); void load(); void loadAllProducts() }} />{editing !== 'new' && <div className="existing-images"><p className="eyebrow">Bilder verwalten</p>{imageActionError && <div className="form-error" role="alert">{imageActionError}</div>}<Gallery product={editing} admin deletingImageId={deletingImageId} onDeleteImage={(imageId) => { void deleteProductImage(imageId) }} /></div>}</div></div>}
   </div>
 }
 
