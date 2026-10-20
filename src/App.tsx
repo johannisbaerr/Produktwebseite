@@ -250,14 +250,24 @@ function StorefrontHeader({ cartCount, search, onSearchChange, onSearch, onSearc
 }
 
 function BrandLoader({ message }: { message: string }) {
-  return <main className="brand-loader" role="status" aria-live="polite">
-    <div className="brand-loader-content">
-      <span className="brand-loader-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M10 24h23m-10-11 11 11-11 11" /></svg></span>
-      <strong>Amspind</strong>
-      <span className="brand-loader-progress" aria-hidden="true"><span /></span>
-      <span className="brand-loader-message">{message}</span>
-    </div>
-  </main>
+  return <div className="public-shell brand-loader-page">
+    <header className="site-header brand-loader-header">
+      <a className="brand" href="/" aria-label="Amspind Startseite"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M10 24h23m-10-11 11 11-11 11" /></svg></span>Amspind</a>
+      <div className="shop-search brand-loader-search"><input aria-label="Produkte suchen" placeholder="Wonach suchst du?" disabled /><button type="button" aria-label="Suche" disabled>⌕</button></div>
+      <nav aria-label="Shop-Navigation">
+        <button className="cart-button" type="button" disabled aria-label="Warenkorb, 0 Artikel"><span className="cart-icon-wrap"><svg className="cart-icon" viewBox="0 0 32 30" aria-hidden="true"><path d="M2 3h4l3.2 16.1a3 3 0 0 0 3 2.4h12.5a3 3 0 0 0 2.9-2.2L30 9H8" /><circle cx="13" cy="26" r="1.8" /><circle cx="24" cy="26" r="1.8" /></svg><span className="cart-count">0</span></span><span className="cart-label">Warenkorb</span></button>
+        <button className="admin-link profile-link" type="button" disabled aria-label="Admin-Anmeldung"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M4.8 20c.7-3.4 3.3-5.2 7.2-5.2s6.5 1.8 7.2 5.2" /></svg></button>
+      </nav>
+    </header>
+    <main className="brand-loader" role="status" aria-live="polite">
+      <div className="brand-loader-content">
+        <span className="brand-loader-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M10 24h23m-10-11 11 11-11 11" /></svg></span>
+        <strong>Amspind</strong>
+        <span className="brand-loader-progress" aria-hidden="true"><span /></span>
+        <span className="brand-loader-message">{message}</span>
+      </div>
+    </main>
+  </div>
 }
 
 function PublicView({ onAdmin }: { onAdmin: () => void }) {
