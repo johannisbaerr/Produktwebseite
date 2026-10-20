@@ -487,7 +487,6 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
     const extraIds = [...new Set(selectedExtras)].sort((a, b) => a - b)
     const currentProductQuantity = cart.filter((item) => item.productId === product.id).reduce((total, item) => total + item.quantity, 0)
     if (currentProductQuantity >= product.stock) {
-      setCartError(`Nicht genug auf Lager: ${product.name}`)
       return false
     }
     const extra = extraIds.map((id) => product.extraOptions?.find((entry) => entry.id === id)).find((entry) => !entry || entry.stock < cart.filter((item) => item.extraIds.includes(entry.id)).reduce((total, item) => total + item.quantity, 0) + 1)
@@ -650,7 +649,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       </div>
       <aside className="cart-summary"><div className="cart-total"><strong>Zwischensumme ({cartCount} Artikel)</strong><strong>{currency.format(cartTotal / 100)}</strong></div>
       {shareLink && <label className="share-link-field">Bestelllink<input readOnly value={shareLink} onFocus={(event) => event.currentTarget.select()} /></label>}
-      {cartError && <div className="form-error" role="alert">{cartError}</div>}
+      {cartError && cart.length > 0 && <div className="form-error" role="alert">{cartError}</div>}
       <button className="primary-button" disabled={!cart.length} onClick={() => { void createShareableOrder() }}>{shareLink ? 'Bestelllink kopieren / teilen' : 'Bestellung teilen'}</button>
       <p className="cart-note">Die Bestelldetails sind nur nach Admin-Anmeldung sichtbar.</p>
       </aside>
