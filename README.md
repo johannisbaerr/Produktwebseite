@@ -19,6 +19,8 @@ Wenn die öffentliche Seite meldet, dass Kategorien nicht geladen werden können
 
 Produkte können zusätzliche, kommagetrennte Suchbegriffe in der Verwaltung erhalten. Namen, Beschreibung, Kategorie und diese Suchbegriffe werden gemeinsam für eine fehlertolerante Suche verwendet; neue Produkte werden dadurch ohne Codeänderung suchbar.
 
+Neue Produktbilder werden vor dem Upload im Browser mit dem lokal ausgeführten IS-Net-Freistellungsmodell verarbeitet und als WebP mit transparentem Hintergrund hochgeladen. Beim ersten Einsatz lädt der Browser das quantisierte Modell (ca. 46 MB) von [Hugging Face](https://huggingface.co/Ko033/isnet-general-use-onnx); die ausgewählten Originaldateien werden nicht an einen externen Bilddienst oder den Shop geschickt. Das Modell und seine IS-Net-Grundlage sind unter Apache-2.0 ausgewiesen. Die Freistellung benötigt eine Internetverbindung für den erstmaligen Modellabruf.
+
 Bestelllinks enthalten einen zufälligen Zugriffsschlüssel. Die Produktdaten der Bestellung werden serverseitig als Momentaufnahme gespeichert und sind ausschließlich über eine aktive Admin-Sitzung abrufbar. Der Link allein gewährt keinen Einblick in die Bestellung.
 
 Beim Öffnen eines Bestelllinks fragt die Admin-Ansicht, ob die bestellten Mengen vom Lagerbestand abgezogen werden sollen. Die serverseitige Transaktion verhindert Mehrfachabbuchungen und bucht nur ab, wenn der aktuelle Bestand für alle Artikel ausreicht.

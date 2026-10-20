@@ -4,6 +4,7 @@ import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCenter, 
 import type { DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { removeImageBackground } from './removeImageBackground'
 import './App.css'
 
 type Image = { id: number; url: string; originalName: string }
@@ -431,6 +432,7 @@ function ProductForm({ product, onSaved, onCancel }: { product?: Product; onSave
   const [files, setFiles] = useState<FileList | null>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [processingStatus, setProcessingStatus] = useState('')
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
@@ -447,10 +449,20 @@ function ProductForm({ product, onSaved, onCancel }: { product?: Product; onSave
     data.append('priceCents', String(Math.round(priceValue * 100)))
     data.append('stock', form.stock)
     data.append('status', form.status)
-    if (files) Array.from(files).forEach((file) => data.append('images', file))
-    try { await request(product ? `/api/admin/products/${product.id}` : '/api/admin/products', { method: product ? 'PATCH' : 'POST', body: data }); onSaved() }
+    try {
+      if (files) {
+        const selectedFiles = Array.from(files)
+        for (const [index, file] of selectedFiles.entries()) {
+          setProcessingStatus(`Hintergrund entfernen (${index + 1}/${selectedFiles.length}) ...`)
+          data.append('images', await removeImageBackground(file))
+        }
+      }
+      setProcessingStatus('Produkt wird gespeichert ...')
+      await request(product ? `/api/admin/products/${product.id}` : '/api/admin/products', { method: product ? 'PATCH' : 'POST', body: data })
+      onSaved()
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'Speichern fehlgeschlagen.') }
-    finally { setSaving(false) }
+    finally { setSaving(false); setProcessingStatus('') }
   }
   return <form className="product-form" onSubmit={(event) => { void submit(event) }}>
     <div className="form-header"><div><p className="eyebrow">{product ? 'Produkt bearbeiten' : 'Neues Produkt'}</p><h2>{product ? product.name : 'Artikel anlegen'}</h2></div>{onCancel && <button type="button" className="icon-button" onClick={onCancel} aria-label="Schließen">×</button>}</div>
@@ -459,8 +471,8 @@ function ProductForm({ product, onSaved, onCancel }: { product?: Product; onSave
     <label>Zusätzliche Suchbegriffe<input value={form.searchTerms} onChange={(e) => setForm({ ...form, searchTerms: e.target.value })} placeholder="z. B. süß, Getränk, Apfel" /><small>Kommagetrennte Begriffe helfen bei Synonymen und Schreibvarianten. Sie sind direkt am Produkt gespeichert.</small></label>
     <div className="form-row"><label>Preis in EUR<input required inputMode="decimal" min="0" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="0,00" /></label><label>Lagerbestand<input required type="number" min="0" step="1" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} placeholder="0" /></label></div>
     <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as 'active' | 'unlisted' })}><option value="active">Aktiv gelistet</option><option value="unlisted">Nicht gelistet</option></select></label>
-    <label className="file-drop">Produktbilder{product && <small>Bestehende Bilder bleiben erhalten. Neue Dateien werden ergänzt.</small>}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required={!product} onChange={(e) => setFiles(e.target.files)} /><span>{files?.length ? `${files.length} Bild(er) ausgewählt` : 'Bilder auswählen oder hierher ziehen'}</span></label>
-    {error && <div className="form-error">{error}</div>}<button className="primary-button" disabled={saving}>{saving ? 'Wird gespeichert ...' : product ? 'Änderungen speichern' : 'Produkt veröffentlichen'}</button>
+    <label className="file-drop">Produktbilder{product && <small>Bestehende Bilder bleiben erhalten. Neue Dateien werden ergänzt.</small>}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required={!product} onChange={(e) => setFiles(e.target.files)} /><span>{files?.length ? `${files.length} Bild(er) ausgewählt` : 'Bilder auswählen oder hierher ziehen'}</span><small className="background-removal-note">Neue Bilder werden vor dem Upload lokal im Browser freigestellt. Beim ersten Mal wird dafür ein KI-Modell (ca. 46 MB) geladen; die ausgewählten Originaldateien werden nicht an den Shop übertragen.</small></label>
+    {error && <div className="form-error">{error}</div>}<button className="primary-button" disabled={saving}>{saving ? processingStatus || 'Wird gespeichert ...' : product ? 'Änderungen speichern' : 'Produkt veröffentlichen'}</button>
   </form>
 }
 
@@ -479,7 +491,7 @@ function SortableCategory({ category, selected, onSelect }: { category: Category
   return <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={`category-admin-row ${selected ? 'selected' : ''} ${isDragging ? 'is-dragging' : ''} ${isOver ? 'is-drop-target' : ''}`}>
     <button className="drag-handle category-drag-handle" type="button" aria-label={`${category.name} ziehen, um die Position zu ändern`} {...attributes} {...listeners}>⠿</button>
     {category.id === 'all-products'
-      ? <><span className="category-select category-fixed-name">{category.name}</span><span className="category-fixed-label">Fest</span></>
+      ? <><button className="category-select category-fixed-name" type="button" onClick={onSelect}>{category.name}</button><span className="category-fixed-label">Fest</span></>
       : <button className="category-select" type="button" onClick={onSelect}>{category.name}</button>}
   </div>
 }
@@ -541,8 +553,14 @@ function CategoryManager({ products }: { products: Product[] }) {
     setBusy(true)
     setError('')
     const data = new FormData()
-    data.append('name', name)
     data.append('design', design)
+    if (selected.id === 'all-products') {
+      try { await request(`/api/admin/categories/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ design }) }); await load() }
+      catch (reason) { setError(reason instanceof Error ? reason.message : 'Design für „Alle Produkte“ konnte nicht gespeichert werden.') }
+      finally { setBusy(false) }
+      return
+    }
+    data.append('name', name)
     data.append('previewMode', previewMode)
     data.append('productIds', JSON.stringify(selectedProducts))
     if (previewFile) data.append('previewImage', previewFile)
@@ -582,7 +600,7 @@ function CategoryManager({ products }: { products: Product[] }) {
     previewImageUrl: previewFile ? previewImageUrl || selected?.previewImageUrl || null : selected?.previewImageUrl || null,
     productIds: selectedProducts,
   }
-  const previewProducts = products.filter((product) => selectedProducts.includes(product.id))
+  const previewProducts = selectedId === 'all-products' ? products : products.filter((product) => selectedProducts.includes(product.id))
   return <section className="admin-section category-manager">
     <div className="category-admin-layout"><div className="category-admin-list"><div className="category-list-heading"><strong>Kategorien</strong><span>{Math.max(0, categories.length - 1)} Kategorien</span></div>
       {error && <div className="form-error" role="alert">{error}</div>}
@@ -595,20 +613,22 @@ function CategoryManager({ products }: { products: Product[] }) {
       </DndContext>
       <form className="category-create" onSubmit={(event) => { event.preventDefault(); void create() }}><label htmlFor="new-category-name">Neue Kategorie</label><input id="new-category-name" value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Kategoriename" aria-label="Name der neuen Kategorie" maxLength={80} /><button className="primary-button" type="submit" disabled={creating}>{creating ? 'Wird hinzugefügt ...' : '+ Kategorie hinzufügen'}</button></form>
     </div>
-      <div className="category-editor">{selected ? <>
-        <label>Kategoriename<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label>
+      <div className={`category-editor ${selected?.id === 'all-products' ? 'all-products-editor' : ''}`}>{selected ? <>
+        {selected.id === 'all-products' && <div className="fixed-category-note">„Alle Produkte“ bleibt eine feste Kategorie. Hier kannst du nur das Design ändern; die übrigen Einstellungen sind deaktiviert.</div>}
+        <label className={selected.id === 'all-products' ? 'disabled-category-setting' : ''}>Kategoriename<input value={name} disabled={selected.id === 'all-products'} onChange={(event) => setName(event.target.value)} maxLength={80} /></label>
         <label>Design<select value={design} onChange={(event) => setDesign(event.target.value)}>{categoryDesigns.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
         <CategoryDesignPreview category={previewCategory} products={previewProducts} />
-        <label>Vorschaubild<select value={previewMode} onChange={(event) => setPreviewMode(event.target.value as 'products' | 'upload')}><option value="products">Aus Produktbildern wechseln</option><option value="upload">Eigenes Bild hochladen</option></select></label>
-        {previewMode === 'upload' && <label className="file-drop">Kategorie-Bild<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => setPreviewFile(event.target.files?.[0] || null)} /><span>{previewFile?.name || (selected.previewImageUrl ? 'Bild vorhanden – neues Bild auswählen zum Ersetzen' : 'Bild auswählen')}</span></label>}
-        <fieldset className="product-picker"><legend>Produkte dieser Kategorie</legend>{products.length ? products.map((product) => <label key={product.id} className="product-choice"><input type="checkbox" checked={selectedProducts.includes(product.id)} onChange={(event) => setSelectedProducts((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} /><span>{product.name} <small>{product.status === 'unlisted' ? '· Nicht gelistet (öffentlich ausgeblendet)' : ''}</small></span></label>) : <p className="muted">Noch keine Produkte angelegt.</p>}</fieldset>
-        <div className="category-editor-actions"><button className="primary-button" disabled={busy} onClick={() => { void save() }}>{busy ? 'Wird gespeichert ...' : 'Kategorie speichern'}</button><button className="delete-button" onClick={() => { void remove() }}>Kategorie löschen</button></div>
+        <label className={selected.id === 'all-products' ? 'disabled-category-setting' : ''}>Vorschaubild<select disabled={selected.id === 'all-products'} value={previewMode} onChange={(event) => setPreviewMode(event.target.value as 'products' | 'upload')}><option value="products">Aus Produktbildern wechseln</option><option value="upload">Eigenes Bild hochladen</option></select></label>
+        {previewMode === 'upload' && <label className={`file-drop ${selected.id === 'all-products' ? 'disabled-category-setting' : ''}`}>Kategorie-Bild<input disabled={selected.id === 'all-products'} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => setPreviewFile(event.target.files?.[0] || null)} /><span>{previewFile?.name || (selected.previewImageUrl ? 'Bild vorhanden – neues Bild auswählen zum Ersetzen' : 'Bild auswählen')}</span></label>}
+        <fieldset className={`product-picker ${selected.id === 'all-products' ? 'disabled-category-setting' : ''}`} disabled={selected.id === 'all-products'}><legend>Produkte dieser Kategorie</legend>{products.length ? products.map((product) => <label key={product.id} className="product-choice"><input type="checkbox" checked={selected.id === 'all-products' || selectedProducts.includes(product.id)} onChange={(event) => setSelectedProducts((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} /><span>{product.name} <small>{product.status === 'unlisted' ? '· Nicht gelistet (öffentlich ausgeblendet)' : ''}</small></span></label>) : <p className="muted">Noch keine Produkte angelegt.</p>}</fieldset>
+        <div className="category-editor-actions"><button className="primary-button" disabled={busy} onClick={() => { void save() }}>{busy ? 'Wird gespeichert ...' : selected.id === 'all-products' ? 'Design speichern' : 'Kategorie speichern'}</button>{selected.id !== 'all-products' && <button className="delete-button" onClick={() => { void remove() }}>Kategorie löschen</button>}</div>
       </> : <div className="category-editor-empty"><span aria-hidden="true">↖</span><p className="muted">Wähle links eine Kategorie aus, um sie zu öffnen und zu bearbeiten.</p></div>}</div></div>
   </section>
 }
 
 function ChangeNotes() {
   const entries = [
+    { date: '2026-10-20', title: '„Alle Produkte“ im Admin bearbeiten', details: '„Alle Produkte“ kann jetzt im Kategorie-Editor ausgewählt und im Design geändert werden. Einstellungen, die für die feste Kategorie nicht verfügbar sind, werden deaktiviert angezeigt.' },
     { date: '2026-10-20', title: 'Kategorien sortieren und Designs vorab ansehen', details: '„Alle Produkte“ kann jetzt zusammen mit den übrigen Kategorien per Drag-and-drop sortiert werden. Der Kategorieneditor zeigt eine Live-Vorschau für Kachel, Panorama und Kompakt; Admin-Interaktionen erhielten dezente Hover- und Fokus-Effekte.' },
     { date: '2026-10-19', title: 'Zurücknavigation und Admin-Bereiche verbessert', details: 'Der Handy-Zurückknopf schließt den Warenkorb und stellt die vorherige Ansicht wieder her. Die öffentliche Startseite blendet keine Kategorien-Warnung mehr ein, solange die vorhandene Kategorieansicht weiter nutzbar ist. Admin-Bereiche sind jetzt aufklappbar strukturiert.' },
     { date: '2026-10-19', title: 'Kategorien im Admin zuverlässiger anlegen', details: 'Beim Erstellen einer Kategorie werden Datenbankfehler jetzt protokolliert und fehlende Shop-Migrationen verständlich gemeldet. Nach erfolgreichem Anlegen erscheint die Kategorie direkt in der Liste.' },

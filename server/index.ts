@@ -200,7 +200,13 @@ app.patch('/api/admin/categories/:id', auth, upload.single('previewImage'), asyn
   const { data: current, error: lookupError } = await supabase.from('categories').select('id,name,sort_order,design,preview_mode,preview_image').eq('id', id).maybeSingle()
   if (lookupError) return res.status(500).json({ error: 'Kategorie konnte nicht geladen werden.' })
   if (!current) return res.status(404).json({ error: 'Kategorie nicht gefunden.' })
-  if (id === 'all-products') return res.status(400).json({ error: '„Alle Produkte“ kann nicht bearbeitet werden.' })
+  if (id === 'all-products') {
+    const design = String(req.body?.design ?? current.design)
+    if (!categoryDesigns.includes(design as typeof categoryDesigns[number])) return res.status(400).json({ error: 'Ungültiges Kategorie-Design.' })
+    const { error } = await supabase.from('categories').update({ design }).eq('id', id)
+    if (error) return res.status(500).json({ error: 'Design für „Alle Produkte“ konnte nicht gespeichert werden.' })
+    return res.json({ ok: true })
+  }
   const name = String(req.body?.name ?? current.name).trim()
   const design = String(req.body?.design ?? current.design)
   const previewMode = String(req.body?.previewMode ?? current.preview_mode)
