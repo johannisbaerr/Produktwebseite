@@ -74,6 +74,8 @@ nav a:hover { color: var(--ink); }
 .gallery-main { position: relative; aspect-ratio: 1; overflow: hidden; background: linear-gradient(145deg, #f7faff 0%, #edf3f9 100%); border: 0; border-radius: 16px; touch-action: pan-y; }
 .gallery-main > img { width: 100%; height: 100%; object-fit: contain; padding: 18px; display: block; }
 .gallery-main > img.gallery-current-image { animation: category-image-slide .42s cubic-bezier(.22,.72,.24,1) both; will-change: transform, opacity; }
+.gallery-image-delete { position: absolute; top: 12px; right: 12px; border: 1px solid #efb6ad; border-radius: 999px; padding: 7px 10px; background: rgba(255,255,255,.96); color: #9b3f31; font-size: 11px; font-weight: 650; cursor: pointer; box-shadow: 0 3px 10px rgba(13,35,66,.1); }
+.gallery-image-delete:hover { border-color: #d48b80; background: #fff5f3; }
 .image-placeholder { height: 100%; display: grid; place-items: center; color: var(--muted); }
 .gallery-arrow { position: absolute; top: 50%; border: 0; border-radius: 999px; width: 40px; height: 40px; background: rgba(255,255,255,0.9); color: var(--ink); transform: translateY(-50%); font-size: 20px; box-shadow: 0 8px 18px rgba(13,35,66,0.1); }
 .gallery-arrow.left { left: 14px; }
@@ -457,7 +459,15 @@ textarea { resize: vertical; min-height: 110px; }
 .admin-accordion .category-manager { margin: 0; }
 .category-manager .category-admin-layout { gap: 16px; }
 .products-accordion > summary { min-height: 76px; }
-.product-order-manager > .reorder-hint { margin: 0 0 12px; }
+.category-product-order-accordion { border: 1px solid #dce5ed; border-radius: 10px; background: #f8fafc; overflow: hidden; }
+.category-product-order-accordion > summary { padding: 13px 15px; cursor: pointer; color: var(--brand-blue); font-size: 13px; font-weight: 650; }
+.category-product-order-accordion[open] > summary { border-bottom: 1px solid var(--line); }
+.category-product-order { padding: 12px 15px 16px; }
+.category-product-order > .reorder-hint { margin: 0 0 10px; }
+.category-product-order .admin-product { padding: 12px 0; }
+.category-product-order .admin-thumb { width: 58px; height: 58px; border-radius: 10px; }
+.category-product-order .admin-product h3 { font-size: 14px; }
+.category-product-order .admin-product-main p { display: none; }
 .admin-main > .admin-intro { margin-bottom: 24px; }
 .admin-panel-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 12px; }
 .admin-panel-actions .reorder-hint { margin: 0; }

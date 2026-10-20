@@ -89,9 +89,15 @@ function readCart(): CartItem[] {
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${url}`, { ...options, credentials: 'include' })
-  const data = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(data.error || 'Etwas ist schiefgelaufen.')
-  return data
+  const responseText = await response.text()
+  let data: unknown = {}
+  try {
+    data = JSON.parse(responseText)
+  } catch {
+    if (!response.ok && responseText.trim()) throw new Error(`Serverfehler (${response.status}): ${responseText.slice(0, 240)}`)
+  }
+  if (!response.ok) throw new Error(isRecord(data) && typeof data.error === 'string' ? data.error : `Anfrage fehlgeschlagen (${response.status}).`)
+  return data as T
 }
 
 function normalize(value: string) {
@@ -147,6 +153,7 @@ function Gallery({ product, admin = false, priority = false, onDeleteImage }: { 
   return <div className="gallery"><div className="gallery-main" onTouchStart={(event) => { startTouch.current = { x: event.touches[0].clientX, y: event.touches[0].clientY } }} onTouchEnd={(event) => { if (startTouch.current === null) return; const distanceX = event.changedTouches[0].clientX - startTouch.current.x; const distanceY = event.changedTouches[0].clientY - startTouch.current.y; if (Math.abs(distanceX) > 35 && Math.abs(distanceX) > Math.abs(distanceY)) move(distanceX > 0 ? -1 : 1); startTouch.current = null }}>
     {image ? <img key={image.url} className="gallery-current-image" style={{ '--slide-offset': direction > 0 ? '28px' : '-28px' } as CSSProperties} src={image.url} alt={product.name} loading={priority ? 'eager' : 'lazy'} decoding="async" fetchPriority={priority ? 'high' : 'auto'} /> : <div className="image-placeholder">Kein Bild</div>}
     {admin && image?.backgroundRemoved && <span className="background-removed-badge">✓ Freigestellt</span>}
+    {admin && image && onDeleteImage && <button type="button" className="gallery-image-delete" onClick={() => onDeleteImage(image.id)} aria-label={`${image.originalName} löschen`} title="Dieses Bild löschen">Bild löschen</button>}
     {product.images.length > 1 && <><button className="gallery-arrow left" aria-label="Vorheriges Bild" onClick={() => move(-1)}>←</button><button className="gallery-arrow right" aria-label="Nächstes Bild" onClick={() => move(1)}>→</button></>}
     <span className="image-count">{product.images.length ? `${selected + 1} / ${product.images.length}` : '0 Bilder'}</span>
   </div>{product.images.length > 1 && <div className="thumbnails">{product.images.map((item, index) => <div className={`thumbnail-wrap ${index === selected ? 'selected' : ''}`} key={item.id}><button className="thumbnail" onClick={() => setSelected(index)}><img src={item.url} alt={`${product.name} Ansicht ${index + 1}`} loading="lazy" decoding="async" /></button>{admin && onDeleteImage && <button className="thumbnail-remove" onClick={() => onDeleteImage(item.id)} aria-label="Bild entfernen">×</button>}</div>)}</div>}</div>
@@ -264,10 +271,14 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   }, [categories])
   const displayCategories = sortedCategories
   const categoriesForProduct = (product: Product) => sortedCategories.filter((category) => category.id !== 'all-products' && category.productIds.includes(product.id)).map((category) => category.name)
-  const visibleProducts = useMemo(() => products.filter((product) => {
+  const visibleProducts = useMemo(() => {
+    const selectedOrder = sortedCategories.find((category) => category.id === selectedCategory)?.productIds || []
+    const positions = new Map(selectedOrder.map((id, index) => [id, index]))
+    return products.filter((product) => {
     const inCategory = !selectedCategory || selectedCategory === 'all-products' || sortedCategories.find((category) => category.id === selectedCategory)?.productIds.includes(product.id)
     return inCategory && matchesSearch(product, categoriesForProduct(product), search)
-  }), [products, search, selectedCategory, sortedCategories])
+    }).sort((left, right) => (positions.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (positions.get(right.id) ?? Number.MAX_SAFE_INTEGER))
+  }, [products, search, selectedCategory, sortedCategories])
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0)
   const cartTotal = cart.reduce((total, item) => total + item.quantity * (products.find((product) => product.id === item.productId)?.priceCents || 0), 0)
   const isCartHistoryEntry = () => isRecord(window.history.state) && window.history.state.amspindCart === true
@@ -549,11 +560,11 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
             return quantity > 0
               ? <div className={`product-cart-actions ${addedProductId === product.id ? 'just-added' : ''} ${removingCartProductIds.includes(product.id) ? 'is-removing' : ''}`} aria-live="polite">
                 <span className="add-cart-button in-cart" role="status">Im Warenkorb{quantity > 1 ? ` · ${quantity}` : ''} ✓</span>
-                <button className="product-cart-icon-button" disabled={atStockLimit} title={atStockLimit ? 'Nicht genug auf Lager' : 'Weiteres Produkt hinzufügen'} aria-label={atStockLimit ? 'Nicht genug auf Lager' : 'Weiteres Produkt hinzufügen'} onClick={() => addToCart(product)}>
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-                </button>
                 <button className="product-cart-icon-button remove-from-cart" title={quantity > 1 ? 'Ein Stück entfernen' : 'Aus dem Warenkorb entfernen'} aria-label={quantity > 1 ? 'Ein Stück entfernen' : 'Aus dem Warenkorb entfernen'} onClick={() => changeQuantity(product.id, quantity > 1 ? quantity - 1 : 0)}>
                   {quantity > 1 ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg>}
+                </button>
+                <button className="product-cart-icon-button" disabled={atStockLimit} title={atStockLimit ? 'Nicht genug auf Lager' : 'Weiteres Produkt hinzufügen'} aria-label={atStockLimit ? 'Nicht genug auf Lager' : 'Weiteres Produkt hinzufügen'} onClick={() => addToCart(product)}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
                 </button>
                 {atStockLimit && <span className="stock-limit-hint" role="status">Nicht genug auf Lager</span>}
               </div>
@@ -649,8 +660,12 @@ function SortableProduct({ product, disabled, onEdit, onDelete, showDragHandle =
   </article>
 }
 
-function ProductOrderManager({ products, onReorder }: { products: Product[]; onReorder: (orderedIds: number[]) => Promise<void> }) {
-  const [orderedProducts, setOrderedProducts] = useState(products)
+function CategoryProductOrderManager({ category, products, onReorder }: { category: Category; products: Product[]; onReorder: (categoryId: string, orderedIds: number[]) => Promise<void> }) {
+  const initialOrder = category.productIds
+  const [orderedProducts, setOrderedProducts] = useState(() => {
+    const byId = new Map(products.map((product) => [product.id, product]))
+    return [...initialOrder.map((id) => byId.get(id)).filter((product): product is Product => Boolean(product)), ...products.filter((product) => !initialOrder.includes(product.id))]
+  })
   const [error, setError] = useState('')
   const [draggingProductId, setDraggingProductId] = useState<number | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
@@ -665,14 +680,14 @@ function ProductOrderManager({ products, onReorder }: { products: Product[]; onR
     setOrderedProducts(reordered)
     setError('')
     try {
-      await onReorder(reordered.map((product) => product.id))
+      await onReorder(category.id, reordered.map((product) => product.id))
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Reihenfolge konnte nicht gespeichert werden.')
       setOrderedProducts(previous)
     }
   }
   const activeProduct = orderedProducts.find((product) => product.id === draggingProductId)
-  return <section className="admin-section product-order-manager">
+  return <section className="category-product-order">
     <p className="reorder-hint">Artikel am Griffpunkt ziehen, um ihre Reihenfolge im Shop zu ändern.</p>
     {error && <div className="form-error" role="alert">{error}</div>}
     {orderedProducts.length === 0 ? <div className="admin-empty">Noch keine Produkte vorhanden.</div> : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={({ active }) => setDraggingProductId(Number(active.id))} onDragCancel={() => setDraggingProductId(null)} onDragEnd={(event) => { void saveOrder(event) }}>
@@ -694,7 +709,7 @@ function SortableCategory({ category, selected, onSelect }: { category: Category
   </div>
 }
 
-function CategoryManager({ products }: { products: Product[] }) {
+function CategoryManager({ products, onReorderProducts }: { products: Product[]; onReorderProducts: (categoryId: string, orderedIds: number[]) => Promise<void> }) {
   const [categories, setCategories] = useState<Category[]>([allProductsCategory])
   const [selectedId, setSelectedId] = useState('all-products')
   const [name, setName] = useState('')
@@ -747,6 +762,10 @@ function CategoryManager({ products }: { products: Product[] }) {
       setNewCategoryName('')
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Kategorie konnte nicht erstellt werden.') }
     finally { setCreating(false) }
+  }
+  const reorderCategoryProducts = async (categoryId: string, orderedIds: number[]) => {
+    await onReorderProducts(categoryId, orderedIds)
+    await load()
   }
   const save = async () => {
     if (!selected) return
@@ -821,12 +840,8 @@ function CategoryManager({ products }: { products: Product[] }) {
         <label>Design<select value={design} onChange={(event) => setDesign(event.target.value)}>{categoryDesigns.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
         <CategoryDesignPreview category={previewCategory} products={previewProducts} />
         <details className="category-design-options">
-          <summary>Größe, Rahmen & Farben</summary>
+          <summary>Farben</summary>
           <div className="category-design-controls">
-            <label>Kartenbreite <span>{designSettings.width} px</span><input type="range" min="280" max="500" step="10" value={designSettings.width} onChange={(event) => setDesignSettings((current) => ({ ...current, width: Number(event.target.value) }))} /></label>
-            <label>Kartenhöhe <span>{designSettings.height} px</span><input type="range" min="350" max="600" step="10" value={designSettings.height} onChange={(event) => setDesignSettings((current) => ({ ...current, height: Number(event.target.value) }))} /></label>
-            <label>Rahmenstärke <span>{designSettings.borderWidth} px</span><input type="range" min="0" max="8" step="1" value={designSettings.borderWidth} onChange={(event) => setDesignSettings((current) => ({ ...current, borderWidth: Number(event.target.value) }))} /></label>
-            <label className="category-color-setting">Rahmenfarbe<input type="color" value={designSettings.borderColor} onChange={(event) => setDesignSettings((current) => ({ ...current, borderColor: event.target.value }))} /></label>
             <label className="category-color-setting">Hintergrundfarbe<input type="color" value={designSettings.backgroundColor} onChange={(event) => setDesignSettings((current) => ({ ...current, backgroundColor: event.target.value }))} /></label>
             <label className="category-color-setting">Schriftfarbe<input type="color" value={designSettings.textColor} onChange={(event) => setDesignSettings((current) => ({ ...current, textColor: event.target.value }))} /></label>
           </div>
@@ -834,6 +849,10 @@ function CategoryManager({ products }: { products: Product[] }) {
         <label className={selected.id === 'all-products' ? 'disabled-category-setting' : ''}>Vorschaubild<select disabled={selected.id === 'all-products'} value={previewMode} onChange={(event) => setPreviewMode(event.target.value as 'products' | 'upload')}><option value="products">Aus Produktbildern wechseln</option><option value="upload">Eigenes Bild hochladen</option></select></label>
         {previewMode === 'upload' && <label className={`file-drop ${selected.id === 'all-products' ? 'disabled-category-setting' : ''}`}>Kategorie-Bild<input disabled={selected.id === 'all-products'} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => setPreviewFile(event.target.files?.[0] || null)} /><span>{previewFile?.name || (selected.previewImageUrl ? 'Bild vorhanden – neues Bild auswählen zum Ersetzen' : 'Bild auswählen')}</span></label>}
         <fieldset className={`product-picker ${selected.id === 'all-products' ? 'disabled-category-setting' : ''}`} disabled={selected.id === 'all-products'}><legend>Produkte dieser Kategorie</legend>{products.length ? products.map((product) => <label key={product.id} className="product-choice"><input type="checkbox" checked={selected.id === 'all-products' || selectedProducts.includes(product.id)} onChange={(event) => setSelectedProducts((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} /><span>{product.name} <small>{product.status === 'unlisted' ? '· Nicht gelistet (öffentlich ausgeblendet)' : ''}</small></span></label>) : <p className="muted">Noch keine Produkte angelegt.</p>}</fieldset>
+        <details className="category-product-order-accordion" key={`${selected.id}:${selected.productIds.join(',')}`}>
+          <summary>Produktsortierung</summary>
+          <CategoryProductOrderManager category={selected} products={selected.id === 'all-products' ? products : products.filter((product) => selected.productIds.includes(product.id))} onReorder={reorderCategoryProducts} />
+        </details>
         <div className="category-editor-actions"><button className="primary-button" disabled={busy} onClick={() => { void save() }}>{busy ? 'Wird gespeichert ...' : selected.id === 'all-products' ? 'Design speichern' : 'Kategorie speichern'}</button>{selected.id !== 'all-products' && <button className="delete-button" onClick={() => { void remove() }}>Kategorie löschen</button>}</div>
       </> : <div className="category-editor-empty"><span aria-hidden="true">↖</span><p className="muted">Wähle links eine Kategorie aus, um sie zu öffnen und zu bearbeiten.</p></div>}</div></div>
   </section>
@@ -841,10 +860,10 @@ function CategoryManager({ products }: { products: Product[] }) {
 
 function ChangeNotes() {
   const entries = [
-    { date: '2026-10-20', title: 'Suche, Produktsortierung und Freistellung verbessert', details: 'Suchansichten zeigen nur noch Treffer und lassen sich per Suchpfeil oder Browser-Zurück verlassen. Im Warenkorb verringert das Minus ab zwei Stück die Menge. Die Produktsortierung liegt separat unter den Kategorien. Freigestellte Produktbilder werden markiert und bei Sammelläufen übersprungen; eine einzelne Produktfreistellung lässt sich gezielt aktualisieren.' },
+    { date: '2026-10-20', title: 'Kategorieverwaltung und Produktbilder verbessert', details: 'Der Kategorienfehler wurde in der API korrigiert. Produktsortierungen werden je Kategorie verwaltet, Bilder lassen sich einzeln löschen und die Freistellung läuft im Hintergrund, damit die Seite bedienbar bleibt. Die Warenkorb-Minus- und Plus-Buttons sind getauscht; Kategoriegrößen und Rahmenoptionen sind aus der Verwaltung entfernt.' },
     { date: '2026-10-20', title: 'Warenkorb und Suche flüssiger bedienbar', details: 'Der Warenkorb öffnet und schließt jetzt mit einem sanften Übergang. Suchergebnisse und Warenkorb-Schaltflächen erscheinen ruhiger; entfernte Artikel blenden sich kurz aus. Die Animationen respektieren die reduzierte Bewegung des Geräts.' },
     { date: '2026-10-20', title: 'Startseite und Warenkorb auf dem Handy verbessert', details: 'Kategorie-Karten stehen auf kleinen Displays zweispaltig und lassen sich vertikal durchscrollen. Produktbilder wechseln mit einer seitlichen Animation. Produkte können direkt in der Liste erhöht oder vollständig aus dem Warenkorb entfernt werden; nicht verfügbare weitere Stücke werden markiert.' },
-    { date: '2026-10-20', title: 'Kategorie-Designs individuell anpassen', details: 'Im ausklappbaren Bereich „Größe, Rahmen & Farben“ lassen sich Größe, Rahmen und Farben jeder Kategorie einschließlich „Alle Produkte“ einstellen. Die Vorschau zeigt die Änderungen direkt.' },
+    { date: '2026-10-20', title: 'Kategorie-Designs individuell anpassen', details: 'Die Kategorie-Vorschau zeigt Design- und Farbänderungen direkt. Produkte lassen sich einer Kategorie zuordnen und je Kategorie separat sortieren.' },
     { date: '2026-10-20', title: 'Produktbilder gesammelt freistellen', details: 'Im Produktbereich können alle vorhandenen Produktbilder nacheinander lokal im Browser freigestellt werden. Erfolgreich bearbeitete Shop-Bilder werden ersetzt; Fehler einzelner Bilder bleiben sichtbar.' },
     { date: '2026-10-20', title: '„Alle Produkte“ im Admin bearbeiten', details: '„Alle Produkte“ kann jetzt im Kategorie-Editor ausgewählt und im Design geändert werden. Einstellungen, die für die feste Kategorie nicht verfügbar sind, werden deaktiviert angezeigt.' },
     { date: '2026-10-20', title: 'Kategorien sortieren und Designs vorab ansehen', details: '„Alle Produkte“ kann jetzt zusammen mit den übrigen Kategorien per Drag-and-drop sortiert werden. Der Kategorieneditor zeigt eine Live-Vorschau für Kachel, Panorama und Kompakt; Admin-Interaktionen erhielten dezente Hover- und Fokus-Effekte.' },
@@ -993,10 +1012,8 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
     product.images.map((image) => ({ product, image })),
     `Die Freistellung aller ${product.images.length} Bilder von „${product.name}“ wird aktualisiert. Fortfahren?`,
   )
-  const saveProductOrder = async (orderedIds: number[]) => {
-    await request('/api/admin/products/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderedIds }) })
-    const refreshedProducts = await request<Product[]>('/api/admin/products')
-    setAllProducts(refreshedProducts)
+  const saveProductOrder = async (categoryId: string, orderedIds: number[]) => {
+    await request(`/api/admin/categories/${encodeURIComponent(categoryId)}/products/reorder`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderedIds }) })
   }
   const pendingBackgroundImageCount = allProducts.reduce((total, product) => total + product.images.filter((image) => !image.backgroundRemoved).length, 0)
   return <div className="admin-shell">
@@ -1006,12 +1023,8 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
         <div className="admin-intro"><div><p className="eyebrow">Übersicht</p><h1>Verwaltung</h1><p className="muted">Produkte und Startseite an einem Ort verwalten.</p></div></div>
         <details className="admin-accordion category-accordion">
           <summary><span className="accordion-summary-copy"><strong>Startseite & Kategorien</strong><small>Kategorien erstellen, sortieren und Produkte zuordnen</small></span></summary>
-          <CategoryManager products={allProducts} />
+          <CategoryManager products={allProducts} onReorderProducts={saveProductOrder} />
         </details>
-          <details className="admin-accordion products-order-accordion">
-            <summary><span className="accordion-summary-copy"><strong>Produktsortierung</strong><small>Reihenfolge der Produkte im Shop festlegen</small></span></summary>
-            <ProductOrderManager key={allProducts.map((product) => `${product.id}-${product.updatedAt}`).join('|')} products={allProducts} onReorder={saveProductOrder} />
-          </details>
           <details className="admin-accordion products-accordion">
             <summary><span className="accordion-summary-copy"><strong>Produkte</strong><small>{products.length} Produkte · suchen und bearbeiten</small></span></summary>
           <section className="admin-section product-management-panel"><div className="admin-panel-actions"><p className="reorder-hint">Produkte verwalten und Bilder bearbeiten.</p><div className="product-toolbar-actions"><button className="secondary-button" disabled={Boolean(backgroundJob?.running) || pendingBackgroundImageCount === 0} onClick={() => { void removeBackgroundFromAllImages() }}>{backgroundJob?.running ? `Freigestellt (${backgroundJob.completed}/${backgroundJob.total})` : `Bilder-Freistellung aktualisieren · ${pendingBackgroundImageCount}`}</button><button className="primary-button compact" onClick={() => setEditing('new')}>+ Produkt hinzufügen</button></div></div>
@@ -1031,7 +1044,7 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
         <ChangeNotes />
       </>}
     </main>
-    {editing && <div className="modal-backdrop"><div className="modal"><ProductForm product={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onRefreshBackground={refreshProductBackground} backgroundBusy={Boolean(backgroundJob?.running)} onSaved={() => { setEditing(null); void load(); void loadAllProducts() }} />{editing !== 'new' && <div className="existing-images"><p className="eyebrow">Bilder verwalten</p><Gallery product={editing} admin onDeleteImage={async (imageId) => { try { await request(`/api/admin/products/${editing.id}/images/${imageId}`, { method: 'DELETE' }); const updated = await request<Product[]>(`/api/admin/products?search=${encodeURIComponent(editing.name)}`); setEditing(updated.find((item) => item.id === editing.id) || editing); void loadAllProducts() } catch (reason) { setLoadError(reason instanceof Error ? reason.message : 'Produktbild konnte nicht gelöscht werden.') } }} /></div>}</div></div>}
+    {editing && <div className="modal-backdrop"><div className="modal"><ProductForm product={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onRefreshBackground={refreshProductBackground} backgroundBusy={Boolean(backgroundJob?.running)} onSaved={() => { setEditing(null); void load(); void loadAllProducts() }} />{editing !== 'new' && <div className="existing-images"><p className="eyebrow">Bilder verwalten</p><Gallery product={editing} admin onDeleteImage={async (imageId) => { const image = editing.images.find((entry) => entry.id === imageId); if (!image || !window.confirm(`Bild „${image.originalName}“ löschen?`)) return; try { await request(`/api/admin/products/${editing.id}/images/${imageId}`, { method: 'DELETE' }); const updated = await request<Product[]>(`/api/admin/products?search=${encodeURIComponent(editing.name)}`); setEditing(updated.find((item) => item.id === editing.id) || editing); void loadAllProducts() } catch (reason) { setLoadError(reason instanceof Error ? reason.message : 'Produktbild konnte nicht gelöscht werden.') } }} /></div>}</div></div>}
   </div>
 }
 

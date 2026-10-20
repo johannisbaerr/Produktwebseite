@@ -35,7 +35,14 @@ const startServer = async () => {
 
 app.use(express.json({ limit: '1mb' }))
 app.use(cookieParser())
-app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true }))
+const configuredFrontendOrigin = process.env.FRONTEND_URL || 'http://localhost:5173'
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || origin === configuredFrontendOrigin || /^http:\/\/(?:localhost|127\.0\.0\.1):\d+$/.test(origin)) callback(null, true)
+    else callback(new Error('Origin not allowed'))
+  },
+  credentials: true,
+}))
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -48,7 +55,7 @@ type ProductRow = { id: number; name: string; description: string; price_cents: 
 type SessionRow = { admin_id: number; expires_at: string }
 const productSelect = 'id,name,description,price_cents,stock,status,search_terms,created_at,updated_at,product_images(id,filename,original_name,sort_order),product_categories(category_id)'
 const legacyProductSelect = 'id,name,description,price_cents,stock,status,created_at,updated_at,product_images(id,filename,original_name,sort_order)'
-const imagePayload = (image: ImageRow) => ({ id: image.id, url: supabase.storage.from(storageBucket).getPublicUrl(image.filename).data.publicUrl, originalName: image.original_name, backgroundRemoved: /\/bg-removed-/.test(image.filename) || /\.webp$/i.test(image.filename) })
+const imagePayload = (image: ImageRow) => ({ id: image.id, url: supabase.storage.from(storageBucket).getPublicUrl(image.filename).data.publicUrl, originalName: image.original_name, backgroundRemoved: /\/bg-removed-/.test(image.filename) })
 const productPayload = (row: ProductRow) => ({ id: row.id, name: row.name, description: row.description || '', priceCents: row.price_cents, stock: row.stock, status: row.stock > 0 && row.status === 'active' ? 'active' : 'unlisted', searchTerms: row.search_terms || [], categoryIds: (row.product_categories || []).map(({ category_id }) => category_id), createdAt: row.created_at, updatedAt: row.updated_at, images: (row.product_images || []).sort((a, b) => a.sort_order - b.sort_order || a.id - b.id).map(imagePayload) })
 const isMissingShopSchema = (error: { code?: string; message: string }) =>
   ['42P01', '42703', 'PGRST200', 'PGRST204', 'PGRST205'].includes(error.code || '') ||
@@ -61,9 +68,11 @@ const isMissingCategoryDesignSettings = (error: { code?: string; message: string
 const categoryDesigns = ['Kachel', 'Panorama', 'Kompakt'] as const
 type CategoryDesignSettings = { width: number; height: number; borderWidth: number; borderColor: string; backgroundColor: string; textColor: string }
 type CategoryRow = { id: string; name: string; sort_order: number; design: string; design_settings?: unknown; preview_mode: 'products' | 'upload'; preview_image: string | null }
+type CategoryProductOrderRow = { category_id: string; product_id: number; sort_order: number }
 const defaultCategoryDesignSettings: CategoryDesignSettings = { width: 340, height: 465, borderWidth: 1, borderColor: '#d9e1e7', backgroundColor: '#f7f9fa', textColor: '#172a3c' }
 const categorySelect = 'id,name,sort_order,design,design_settings,preview_mode,preview_image'
 const legacyCategorySelect = 'id,name,sort_order,design,preview_mode,preview_image'
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const isHexColor = (value: unknown): value is string => typeof value === 'string' && /^#[\da-f]{6}$/i.test(value)
 const parseCategoryDesignSettings = (value: unknown): CategoryDesignSettings | null => {
   if (!isRecord(value)) return null
@@ -74,7 +83,7 @@ const parseCategoryDesignSettings = (value: unknown): CategoryDesignSettings | n
   if (!isHexColor(borderColor) || !isHexColor(backgroundColor) || !isHexColor(textColor)) return null
   return { width: Number(width), height: Number(height), borderWidth: Number(borderWidth), borderColor, backgroundColor, textColor }
 }
-const categoryPayload = (row: CategoryRow, productIds: string[]) => ({
+const categoryPayload = (row: CategoryRow, productIds: number[]) => ({
   id: row.id,
   name: row.name,
   sortOrder: row.sort_order,
@@ -90,6 +99,19 @@ const loadCategories = async () => {
 
   console.warn('Category design migration is not applied; loading categories with default design settings:', result.error.message)
   return supabase.from('categories').select(legacyCategorySelect).order('sort_order', { ascending: true })
+}
+const loadCategoryProductOrders = () => supabase.from('category_product_order').select('category_id,product_id,sort_order').order('sort_order', { ascending: true })
+const orderCategoryProductIds = (categoryId: string, productIds: number[], orderRows: CategoryProductOrderRow[]) => {
+  const order = new Map(orderRows.filter((row) => row.category_id === categoryId).map((row) => [row.product_id, row.sort_order]))
+  const uniqueProductIds = [...new Set(productIds)]
+  return uniqueProductIds.sort((left, right) => {
+    const leftOrder = order.get(left)
+    const rightOrder = order.get(right)
+    if (leftOrder === undefined && rightOrder === undefined) return 0
+    if (leftOrder === undefined) return 1
+    if (rightOrder === undefined) return -1
+    return leftOrder - rightOrder
+  })
 }
 
 const auth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -115,9 +137,23 @@ app.get('/api/categories', async (_req, res) => {
     console.error('Category membership query failed:', membershipError.code, membershipError.message)
     return res.status(isMissingShopSchema(membershipError) ? 503 : 500).json({ error: 'Kategorien sind derzeit nicht verfügbar.' })
   }
+  const { data: orderRows, error: orderError } = await loadCategoryProductOrders()
+  if (orderError && !isMissingShopSchema(orderError)) {
+    console.error('Category product order query failed:', orderError.code, orderError.message)
+    return res.status(500).json({ error: 'Kategorie-Reihenfolgen sind derzeit nicht verfügbar.' })
+  }
+  if (orderError) console.warn('Category product order migration is not applied; using the default product order:', orderError.message)
+  const { data: products, error: productsError } = await supabase.from('products').select('id').eq('status', 'active').gt('stock', 0).order('updated_at', { ascending: false }).order('id', { ascending: true })
+  if (productsError) return res.status(500).json({ error: 'Kategorie-Produkte konnten nicht geladen werden.' })
   res.json((categories || []).map((category) => categoryPayload(
     category,
-    (memberships || []).filter((membership) => membership.category_id === category.id).map((membership) => membership.product_id),
+    orderCategoryProductIds(
+      category.id,
+      category.id === 'all-products'
+        ? (products || []).map((product) => product.id)
+        : (memberships || []).filter((membership) => membership.category_id === category.id).map((membership) => membership.product_id),
+      orderRows || [],
+    ),
   )))
 })
 
@@ -212,9 +248,23 @@ app.get('/api/admin/categories', auth, async (_req, res) => {
     console.error('Admin category membership query failed:', membershipError.code, membershipError.message)
     return res.status(isMissingShopSchema(membershipError) ? 503 : 500).json({ error: isMissingShopSchema(membershipError) ? shopMigrationMessage : 'Kategoriezuordnungen konnten nicht geladen werden.' })
   }
+  const { data: orderRows, error: orderError } = await loadCategoryProductOrders()
+  if (orderError && !isMissingShopSchema(orderError)) {
+    console.error('Admin category product order query failed:', orderError.code, orderError.message)
+    return res.status(500).json({ error: 'Kategorie-Produktsortierungen konnten nicht geladen werden.' })
+  }
+  if (orderError) console.warn('Category product order migration is not applied; using the default product order:', orderError.message)
+  const { data: products, error: productsError } = await supabase.from('products').select('id').order('updated_at', { ascending: false }).order('id', { ascending: true })
+  if (productsError) return res.status(500).json({ error: 'Kategorie-Produkte konnten nicht geladen werden.' })
   res.json((categories || []).map((category) => categoryPayload(
     category,
-    (memberships || []).filter((membership) => membership.category_id === category.id).map((membership) => membership.product_id),
+    orderCategoryProductIds(
+      category.id,
+      category.id === 'all-products'
+        ? (products || []).map((product) => product.id)
+        : (memberships || []).filter((membership) => membership.category_id === category.id).map((membership) => membership.product_id),
+      orderRows || [],
+    ),
   )))
 })
 
@@ -259,7 +309,7 @@ app.patch('/api/admin/categories/:id', auth, upload.single('previewImage'), asyn
   const designSettings = submittedDesignSettings === undefined
     ? parseCategoryDesignSettings(current.design_settings) || defaultCategoryDesignSettings
     : parseCategoryDesignSettings(submittedDesignSettings)
-  if (!designSettings) return res.status(400).json({ error: 'Ungültige Design-Einstellungen. Prüfe Größe, Rahmenstärke und Farben.' })
+  if (!designSettings) return res.status(400).json({ error: 'Ungültige Kategorie-Design-Einstellungen.' })
   const hasCustomDesignSettings = JSON.stringify(designSettings) !== JSON.stringify(defaultCategoryDesignSettings)
   if (!hasDesignSettingsColumn && hasCustomDesignSettings) return res.status(503).json({ error: categoryDesignMigrationMessage })
   if (id === 'all-products') {
@@ -312,6 +362,19 @@ app.patch('/api/admin/categories/:id', auth, upload.single('previewImage'), asyn
     const { error: insertError } = await supabase.from('product_categories').insert(productIds.map((product_id) => ({ category_id: id, product_id })))
     if (insertError) return res.status(500).json({ error: 'Produktzuordnungen konnten nicht gespeichert werden.' })
   }
+  const { error: orderDeleteError } = await supabase.from('category_product_order').delete().eq('category_id', id)
+  if (orderDeleteError) {
+    console.error('Category product order reset failed:', orderDeleteError.code, orderDeleteError.message)
+    return res.status(isMissingShopSchema(orderDeleteError) ? 503 : 500).json({ error: isMissingShopSchema(orderDeleteError) ? 'Für die Produktsortierung fehlt die Migration 202610200002_category_product_order.sql.' : 'Produktsortierung konnte nicht aktualisiert werden.' })
+  }
+  if (productIds.length) {
+    const orderRows = productIds.map((product_id, sort_order) => ({ category_id: id, product_id, sort_order }))
+    const { error: orderInsertError } = await supabase.from('category_product_order').insert(orderRows)
+    if (orderInsertError) {
+      console.error('Category product order reset failed:', orderInsertError.code, orderInsertError.message)
+      return res.status(500).json({ error: 'Produktsortierung konnte nicht gespeichert werden.' })
+    }
+  }
   if (current.preview_image && (file || previewMode !== 'upload')) await supabase.storage.from(storageBucket).remove([current.preview_image])
   res.json({ ok: true })
 })
@@ -327,6 +390,40 @@ app.post('/api/admin/categories/reorder', auth, async (req, res) => {
   if (orderedIds.length !== currentIds.length || orderedIds.some((id) => !currentIds.includes(id))) return res.status(400).json({ error: 'Ungültige Kategorienreihenfolge.' })
   const updates = await Promise.all(orderedIds.map((id, index) => supabase.from('categories').update({ sort_order: index }).eq('id', id)))
   if (updates.some(({ error: updateError }) => updateError)) return res.status(500).json({ error: 'Kategorienreihenfolge konnte nicht gespeichert werden.' })
+  res.json({ ok: true })
+})
+
+app.post('/api/admin/categories/:id/products/reorder', auth, async (req, res) => {
+  const categoryId = String(req.params.id)
+  const orderedIds = req.body?.orderedIds
+  if (!Array.isArray(orderedIds) || orderedIds.some((id) => !Number.isSafeInteger(id)) || new Set(orderedIds).size !== orderedIds.length) {
+    return res.status(400).json({ error: 'Ungültige Produktsortierung.' })
+  }
+  const { data: category, error: categoryError } = await supabase.from('categories').select('id').eq('id', categoryId).maybeSingle()
+  if (categoryError) return res.status(500).json({ error: 'Kategorie konnte nicht geladen werden.' })
+  if (!category) return res.status(404).json({ error: 'Kategorie nicht gefunden.' })
+  let currentIds: number[]
+  if (categoryId === 'all-products') {
+    const { data: products, error: productsError } = await supabase.from('products').select('id')
+    if (productsError) return res.status(500).json({ error: 'Kategorie-Produkte konnten nicht geladen werden.' })
+    currentIds = (products || []).map((product: { id: number }) => product.id)
+  } else {
+    const { data: memberships, error: membershipError } = await supabase.from('product_categories').select('product_id').eq('category_id', categoryId)
+    if (membershipError) return res.status(500).json({ error: 'Kategorie-Produkte konnten nicht geladen werden.' })
+    currentIds = (memberships || []).map((membership: { product_id: number }) => membership.product_id)
+  }
+  const requestedIds = orderedIds as number[]
+  if (requestedIds.length !== currentIds.length || requestedIds.some((id) => !currentIds.includes(id))) {
+    return res.status(400).json({ error: 'Die Reihenfolge muss alle Produkte dieser Kategorie genau einmal enthalten.' })
+  }
+  const { error } = await supabase.from('category_product_order').upsert(
+    requestedIds.map((product_id, sort_order) => ({ category_id: categoryId, product_id, sort_order })),
+    { onConflict: 'category_id,product_id' },
+  )
+  if (error) {
+    console.error('Category product reorder failed:', error.code, error.message)
+    return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: isMissingShopSchema(error) ? 'Für die Produktsortierung fehlt die Migration 202610200002_category_product_order.sql.' : 'Produktsortierung konnte nicht gespeichert werden.' })
+  }
   res.json({ ok: true })
 })
 
