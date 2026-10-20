@@ -579,7 +579,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
     }
   }
 
-  if (loading && products.length === 0) return <BrandLoader message="Sortiment wird geladen" />
+  if (loading) return <BrandLoader message="Sortiment wird geladen" />
 
   const cartHeader = <StorefrontHeader
     cartCount={cartCount}
