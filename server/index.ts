@@ -48,7 +48,7 @@ type ProductRow = { id: number; name: string; description: string; price_cents: 
 type SessionRow = { admin_id: number; expires_at: string }
 const productSelect = 'id,name,description,price_cents,stock,status,search_terms,created_at,updated_at,product_images(id,filename,original_name,sort_order),product_categories(category_id)'
 const legacyProductSelect = 'id,name,description,price_cents,stock,status,created_at,updated_at,product_images(id,filename,original_name,sort_order)'
-const imagePayload = (image: ImageRow) => ({ id: image.id, url: supabase.storage.from(storageBucket).getPublicUrl(image.filename).data.publicUrl, originalName: image.original_name })
+const imagePayload = (image: ImageRow) => ({ id: image.id, url: supabase.storage.from(storageBucket).getPublicUrl(image.filename).data.publicUrl, originalName: image.original_name, backgroundRemoved: /\/bg-removed-/.test(image.filename) || /\.webp$/i.test(image.filename) })
 const productPayload = (row: ProductRow) => ({ id: row.id, name: row.name, description: row.description || '', priceCents: row.price_cents, stock: row.stock, status: row.stock > 0 && row.status === 'active' ? 'active' : 'unlisted', searchTerms: row.search_terms || [], categoryIds: (row.product_categories || []).map(({ category_id }) => category_id), createdAt: row.created_at, updatedAt: row.updated_at, images: (row.product_images || []).sort((a, b) => a.sort_order - b.sort_order || a.id - b.id).map(imagePayload) })
 const isMissingShopSchema = (error: { code?: string; message: string }) =>
   ['42P01', '42703', 'PGRST200', 'PGRST204', 'PGRST205'].includes(error.code || '') ||
@@ -186,10 +186,26 @@ app.post('/api/admin/orders/:token/fulfill', auth, async (req, res) => {
 })
 
 app.get('/api/admin/categories', auth, async (_req, res) => {
-  const { data: categories, error } = await loadCategories()
+  let { data: categories, error } = await loadCategories()
   if (error) {
     console.error('Admin category query failed:', error.code, error.message)
     return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: isMissingShopSchema(error) ? shopMigrationMessage : 'Kategorien konnten nicht geladen werden.' })
+  }
+  if (!(categories || []).some((category) => category.id === 'all-products')) {
+    const { error: insertError } = await supabase.from('categories').upsert(
+      { id: 'all-products', name: 'Alle Produkte', sort_order: 0, design: 'Kachel' },
+      { onConflict: 'id', ignoreDuplicates: true },
+    )
+    if (insertError) {
+      console.error('Fixed all-products category could not be restored:', insertError.code, insertError.message)
+      return res.status(500).json({ error: 'Die feste Kategorie „Alle Produkte“ konnte nicht wiederhergestellt werden.' })
+    }
+    const refreshed = await loadCategories()
+    if (refreshed.error) {
+      console.error('Categories failed to reload after restoring all-products:', refreshed.error.code, refreshed.error.message)
+      return res.status(500).json({ error: 'Die Kategorien konnten nach dem Wiederherstellen nicht geladen werden.' })
+    }
+    categories = refreshed.data
   }
   const { data: memberships, error: membershipError } = await supabase.from('product_categories').select('category_id,product_id')
   if (membershipError) {
@@ -404,10 +420,12 @@ const uploadImages = async (productId: number, files: Express.Multer.File[], sta
   const rows: { product_id: number; filename: string; original_name: string; sort_order: number }[] = []
   try {
     for (const [index, file] of files.entries()) {
-      const filename = `${productId}/${crypto.randomUUID()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+      const isBackgroundRemoved = file.originalname.startsWith('amspind-freigestellt-')
+      const originalName = (isBackgroundRemoved ? file.originalname.slice('amspind-freigestellt-'.length) : file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_')
+      const filename = `${productId}/${isBackgroundRemoved ? 'bg-removed-' : ''}${crypto.randomUUID()}-${originalName}`
       const { error: uploadError } = await supabase.storage.from(storageBucket).upload(filename, file.buffer, { contentType: file.mimetype, upsert: false })
       if (uploadError) throw uploadError
-      rows.push({ product_id: productId, filename, original_name: file.originalname, sort_order: startOrder + index })
+      rows.push({ product_id: productId, filename, original_name: originalName, sort_order: startOrder + index })
     }
     if (rows.length) {
       const { error } = await supabase.from('product_images').insert(rows)
@@ -458,7 +476,7 @@ app.post('/api/admin/products/:id/images/:imageId/background-removal', auth, upl
   if (!image) return res.status(404).json({ error: 'Bild nicht gefunden.' })
 
   const baseName = file.originalname.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_') || 'produktbild'
-  const filename = `${productId}/${crypto.randomUUID()}-${baseName}.${file.mimetype === 'image/webp' ? 'webp' : 'png'}`
+  const filename = `${productId}/bg-removed-${crypto.randomUUID()}-${baseName}.${file.mimetype === 'image/webp' ? 'webp' : 'png'}`
   const { error: uploadError } = await supabase.storage.from(storageBucket).upload(filename, file.buffer, { contentType: file.mimetype, upsert: false })
   if (uploadError) return res.status(500).json({ error: 'Freigestelltes Bild konnte nicht hochgeladen werden.' })
 

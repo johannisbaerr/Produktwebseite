@@ -8,7 +8,7 @@ import type { CSSProperties } from 'react'
 import { removeImageBackground } from './removeImageBackground'
 import './App.css'
 
-type Image = { id: number; url: string; originalName: string }
+type Image = { id: number; url: string; originalName: string; backgroundRemoved?: boolean }
 type Product = { id: number; name: string; description: string; priceCents: number; stock: number; status: 'active' | 'unlisted'; searchTerms?: string[]; categoryIds?: string[]; images: Image[]; updatedAt: string }
 type CategoryDesignSettings = { width: number; height: number; borderWidth: number; borderColor: string; backgroundColor: string; textColor: string }
 type Category = { id: string; name: string; sortOrder: number; design: string; designSettings: CategoryDesignSettings; previewMode: 'products' | 'upload'; previewImageUrl: string | null; productIds: number[] }
@@ -146,6 +146,7 @@ function Gallery({ product, admin = false, priority = false, onDeleteImage }: { 
   useEffect(() => setSelected((current) => Math.min(current, Math.max(0, product.images.length - 1))), [product.images.length])
   return <div className="gallery"><div className="gallery-main" onTouchStart={(event) => { startTouch.current = { x: event.touches[0].clientX, y: event.touches[0].clientY } }} onTouchEnd={(event) => { if (startTouch.current === null) return; const distanceX = event.changedTouches[0].clientX - startTouch.current.x; const distanceY = event.changedTouches[0].clientY - startTouch.current.y; if (Math.abs(distanceX) > 35 && Math.abs(distanceX) > Math.abs(distanceY)) move(distanceX > 0 ? -1 : 1); startTouch.current = null }}>
     {image ? <img key={image.url} className="gallery-current-image" style={{ '--slide-offset': direction > 0 ? '28px' : '-28px' } as CSSProperties} src={image.url} alt={product.name} loading={priority ? 'eager' : 'lazy'} decoding="async" fetchPriority={priority ? 'high' : 'auto'} /> : <div className="image-placeholder">Kein Bild</div>}
+    {admin && image?.backgroundRemoved && <span className="background-removed-badge">✓ Freigestellt</span>}
     {product.images.length > 1 && <><button className="gallery-arrow left" aria-label="Vorheriges Bild" onClick={() => move(-1)}>←</button><button className="gallery-arrow right" aria-label="Nächstes Bild" onClick={() => move(1)}>→</button></>}
     <span className="image-count">{product.images.length ? `${selected + 1} / ${product.images.length}` : '0 Bilder'}</span>
   </div>{product.images.length > 1 && <div className="thumbnails">{product.images.map((item, index) => <div className={`thumbnail-wrap ${index === selected ? 'selected' : ''}`} key={item.id}><button className="thumbnail" onClick={() => setSelected(index)}><img src={item.url} alt={`${product.name} Ansicht ${index + 1}`} loading="lazy" decoding="async" /></button>{admin && onDeleteImage && <button className="thumbnail-remove" onClick={() => onDeleteImage(item.id)} aria-label="Bild entfernen">×</button>}</div>)}</div>}</div>
@@ -206,17 +207,20 @@ function CategoryDesignPreview({ category, products }: { category: Category; pro
   </div>
 }
 
-function StorefrontHeader({ cartCount, search, onSearchChange, onSearch, onCart, onAdmin }: {
+function StorefrontHeader({ cartCount, search, onSearchChange, onSearch, onSearchBack, showSearchBack, onCart, onAdmin }: {
   cartCount: number
   search: string
   onSearchChange: (value: string) => void
   onSearch: () => void
+  onSearchBack: () => void
+  showSearchBack: boolean
   onCart: () => void
   onAdmin: () => void
 }) {
   return <header className="site-header">
     <a className="brand" href="/"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M10 24h23m-10-11 11 11-11 11" /></svg></span>Amspind</a>
     <form className="shop-search" onSubmit={(event) => { event.preventDefault(); onSearch() }}>
+      {showSearchBack && <button className="search-back-button" type="button" aria-label="Zur vorherigen Seite" title="Zur vorherigen Seite" onClick={onSearchBack}>←</button>}
       <input aria-label="Produkte suchen" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Wonach suchst du?" />
       <button aria-label="Suchen">⌕</button>
     </form>
@@ -238,6 +242,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('')
   const [cart, setCart] = useState<CartItem[]>(readCart)
   const [addedProductId, setAddedProductId] = useState<number | null>(null)
@@ -266,6 +271,48 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0)
   const cartTotal = cart.reduce((total, item) => total + item.quantity * (products.find((product) => product.id === item.productId)?.priceCents || 0), 0)
   const isCartHistoryEntry = () => isRecord(window.history.state) && window.history.state.amspindCart === true
+  const currentHistoryState = () => isRecord(window.history.state) ? window.history.state : {}
+  const saveCurrentViewToHistory = (view: { search: string; category: string; cart: boolean }) => {
+    window.history.replaceState({
+      ...currentHistoryState(),
+      amspindNavigation: true,
+      amspindSearch: view.search,
+      amspindCategory: view.category,
+      amspindCart: view.cart,
+    }, '', window.location.href)
+  }
+  const navigateToSearch = () => {
+    const query = searchInput.trim()
+    saveCurrentViewToHistory({ search, category: selectedCategory, cart: cartOpen })
+    window.history.pushState({
+      ...currentHistoryState(),
+      amspindNavigation: true,
+      amspindSearch: query,
+      amspindCategory: query ? 'all-products' : '',
+      amspindCart: false,
+    }, '', window.location.href)
+    setSearch(query)
+    setSearchInput(query)
+    setSelectedCategory(query ? 'all-products' : '')
+    setCartOpen(false)
+    setCartClosing(false)
+    setCartError('')
+  }
+  const goBackFromSearch = () => {
+    if (isRecord(window.history.state) && window.history.state.amspindNavigation === true) {
+      window.history.back()
+      return
+    }
+    setSearch('')
+    setSearchInput('')
+    setSelectedCategory('')
+  }
+  const selectCategory = (category: string) => {
+    saveCurrentViewToHistory({ search, category, cart: false })
+    setSearch('')
+    setSearchInput('')
+    setSelectedCategory(category)
+  }
   const animateCartClose = useCallback(() => {
     setCartClosing(true)
     if (cartCloseTimer.current !== null) window.clearTimeout(cartCloseTimer.current)
@@ -284,7 +331,10 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
     if (cartCloseTimer.current !== null) window.clearTimeout(cartCloseTimer.current)
     cartCloseTimer.current = null
     setCartClosing(false)
-    if (!isCartHistoryEntry()) window.history.pushState({ ...(isRecord(window.history.state) ? window.history.state : {}), amspindCart: true }, '', window.location.href)
+    if (!isCartHistoryEntry()) {
+      saveCurrentViewToHistory({ search, category: selectedCategory, cart: false })
+      window.history.pushState({ ...currentHistoryState(), amspindNavigation: true, amspindCart: true }, '', window.location.href)
+    }
     setCartOpen(true)
   }
   const closeCart = () => {
@@ -299,13 +349,27 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
 
   useEffect(() => {
     const syncCartWithHistory = () => {
-      if (isCartHistoryEntry()) {
+      const state = currentHistoryState()
+      if (state.amspindNavigation === true) {
+        const previousSearch = typeof state.amspindSearch === 'string' ? state.amspindSearch : ''
+        const previousCategory = typeof state.amspindCategory === 'string' ? state.amspindCategory : ''
+        setSearch(previousSearch)
+        setSearchInput(previousSearch)
+        setSelectedCategory(previousCategory)
+      } else {
+        setSearch('')
+        setSearchInput('')
+        setSelectedCategory('')
+      }
+      if (state.amspindCart === true) {
         if (cartCloseTimer.current !== null) window.clearTimeout(cartCloseTimer.current)
         cartCloseTimer.current = null
         setCartClosing(false)
         setCartOpen(true)
       } else if (cartOpenRef.current) {
         animateCartCloseRef.current()
+      } else {
+        setCartOpen(false)
       }
     }
     window.addEventListener('popstate', syncCartWithHistory)
@@ -456,25 +520,27 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
 
   const cartHeader = <StorefrontHeader
     cartCount={cartCount}
-    search={search}
-    onSearchChange={setSearch}
-    onSearch={() => { setSelectedCategory('all-products'); closeCart() }}
+    search={searchInput}
+    onSearchChange={setSearchInput}
+    onSearch={navigateToSearch}
+    onSearchBack={goBackFromSearch}
+    showSearchBack={Boolean(search)}
     onCart={() => { if (cartOpen) closeCart(); else openCart() }}
     onAdmin={openAdminFromCart}
   />
   return <div className="public-shell">
     {!cartOpen && cartHeader}
     <main className="shop-main">
-      {!isFullCatalog && <section className="category-navigation" aria-label="Entdecke Kategorien">
+      {!isFullCatalog && !search && <section className="category-navigation" aria-label="Entdecke Kategorien">
         {loading ? <div className="loading">Kategorien werden geladen ...</div> : <>{loadError && <div className="loading" role="alert">{loadError}</div>}{displayCategories.length ? <><div className="category-track-controls">{displayCategories.length > 3 && <div className="promo-arrows"><button aria-label="Kategorien nach links" onClick={() => categoryCardsRef.current?.scrollBy({ left: -380, behavior: 'smooth' })}>‹</button><button aria-label="Kategorien nach rechts" onClick={() => categoryCardsRef.current?.scrollBy({ left: 380, behavior: 'smooth' })}>›</button></div>}</div><div className="category-promo-track" ref={categoryCardsRef}>{displayCategories.map((category) => {
           const categoryProducts = category.id === 'all-products' ? products : products.filter((product) => category.productIds.includes(product.id))
-          return <button key={category.id} className={`category-promo-card ${category.id === 'all-products' ? 'all-products-category' : ''}`} style={categoryCardStyle(category.designSettings || defaultCategoryDesignSettings)} onClick={() => setSelectedCategory(category.id)}>
+          return <button key={category.id} className={`category-promo-card ${category.id === 'all-products' ? 'all-products-category' : ''}`} style={categoryCardStyle(category.designSettings || defaultCategoryDesignSettings)} onClick={() => selectCategory(category.id)}>
             <CategoryPreview category={category} products={categoryProducts} />
             <div className="category-promo-copy"><span className="category-promo-kicker">Amspind Auswahl</span><h2>{category.name}</h2><p>{categoryProducts.length} {categoryProducts.length === 1 ? 'Produkt' : 'Produkte'} für deine Pause</p><span className="category-promo-link">Jetzt entdecken <span aria-hidden="true">→</span></span></div>
           </button>
         })}</div></> : <div className="category-empty"><strong>Deine Auswahl wird vorbereitet</strong><span>Bald findest du hier die Kategorien aus dem Spind.</span></div>}</>}
       </section>}
-      {(selectedCategory || search) && <section className={`collection ${isFullCatalog ? 'full-catalog' : ''}`} id="collection"><div className="section-heading"><div><p className="eyebrow">{search ? 'Suchergebnisse' : 'Die aktuelle Auswahl'}</p><h2>{sortedCategories.find((category) => category.id === selectedCategory)?.name || 'Alle Produkte'}</h2></div><button className="back-to-categories" onClick={() => { setSelectedCategory(''); setSearch(''); setCartError(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>← Kategorien</button><span className="product-total">{visibleProducts.length.toString().padStart(2, '0')} Artikel</span></div>
+      {(selectedCategory || search) && <section className={`collection ${isFullCatalog ? 'full-catalog' : ''}`} id="collection">      <div className="section-heading"><div><p className="eyebrow">{search ? 'Suchergebnisse' : 'Die aktuelle Auswahl'}</p><h2>{search ? `Suche: ${search}` : sortedCategories.find((category) => category.id === selectedCategory)?.name || 'Alle Produkte'}</h2></div><button className="back-to-categories" onClick={() => { saveCurrentViewToHistory({ search: '', category: '', cart: false }); setSelectedCategory(''); setSearch(''); setSearchInput(''); setCartError(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>← Kategorien</button><span className="product-total">{visibleProducts.length.toString().padStart(2, '0')} Artikel</span></div>
         {loading ? <div className="loading">Produkte werden geladen ...</div> : loadError ? <div className="loading" role="alert">{loadError}</div> : visibleProducts.length === 0 ? <div className="empty-public"><span>○</span><h3>{search ? 'Keine passenden Produkte gefunden' : 'Demnächst hier'}</h3><p>{search ? 'Versuche einen anderen Suchbegriff.' : 'Diese Auswahl wird gerade vorbereitet.'}</p></div> : <div className="product-grid">{visibleProducts.map((product, index) => <article className="product-card" key={product.id} style={{ animationDelay: `${Math.min(index * 35, 105)}ms` }}>
           <Gallery product={product} priority={index < 2} /><div className="product-info"><div><h3>{product.name}</h3><p>{product.description}</p></div><div className="product-price"><strong>{currency.format(product.priceCents / 100)}</strong><span className="stock-indicator">{product.stock} auf Lager</span></div></div>
           {(() => {
@@ -486,8 +552,8 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
                 <button className="product-cart-icon-button" disabled={atStockLimit} title={atStockLimit ? 'Nicht genug auf Lager' : 'Weiteres Produkt hinzufügen'} aria-label={atStockLimit ? 'Nicht genug auf Lager' : 'Weiteres Produkt hinzufügen'} onClick={() => addToCart(product)}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
                 </button>
-                <button className="product-cart-icon-button remove-from-cart" title="Aus dem Warenkorb entfernen" aria-label="Aus dem Warenkorb entfernen" onClick={() => changeQuantity(product.id, 0)}>
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg>
+                <button className="product-cart-icon-button remove-from-cart" title={quantity > 1 ? 'Ein Stück entfernen' : 'Aus dem Warenkorb entfernen'} aria-label={quantity > 1 ? 'Ein Stück entfernen' : 'Aus dem Warenkorb entfernen'} onClick={() => changeQuantity(product.id, quantity > 1 ? quantity - 1 : 0)}>
+                  {quantity > 1 ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg> : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg>}
                 </button>
                 {atStockLimit && <span className="stock-limit-hint" role="status">Nicht genug auf Lager</span>}
               </div>
@@ -522,7 +588,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   </div>
 }
 
-function ProductForm({ product, onSaved, onCancel }: { product?: Product; onSaved: () => void; onCancel?: () => void }) {
+function ProductForm({ product, onSaved, onCancel, onRefreshBackground, backgroundBusy = false }: { product?: Product; onSaved: () => void; onCancel?: () => void; onRefreshBackground?: (product: Product) => Promise<void>; backgroundBusy?: boolean }) {
   const [form, setForm] = useState(product ? { name: product.name, description: product.description, price: (product.priceCents / 100).toFixed(2).replace('.', ','), stock: String(product.stock), status: product.status, searchTerms: (product.searchTerms || []).join(', ') } : emptyForm)
   const [files, setFiles] = useState<FileList | null>(null)
   const [error, setError] = useState('')
@@ -549,7 +615,8 @@ function ProductForm({ product, onSaved, onCancel }: { product?: Product; onSave
         const selectedFiles = Array.from(files)
         for (const [index, file] of selectedFiles.entries()) {
           setProcessingStatus(`Hintergrund entfernen (${index + 1}/${selectedFiles.length}) ...`)
-          data.append('images', await removeImageBackground(file))
+          const processedFile = await removeImageBackground(file)
+          data.append('images', new File([processedFile], `amspind-freigestellt-${processedFile.name}`, { type: processedFile.type, lastModified: processedFile.lastModified }))
         }
       }
       setProcessingStatus('Produkt wird gespeichert ...')
@@ -567,18 +634,54 @@ function ProductForm({ product, onSaved, onCancel }: { product?: Product; onSave
     <div className="form-row"><label>Preis in EUR<input required inputMode="decimal" min="0" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="0,00" /></label><label>Lagerbestand<input required type="number" min="0" step="1" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} placeholder="0" /></label></div>
     <label>Status<select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as 'active' | 'unlisted' })}><option value="active">Aktiv gelistet</option><option value="unlisted">Nicht gelistet</option></select></label>
     <label className="file-drop">Produktbilder{product && <small>Bestehende Bilder bleiben erhalten. Neue Dateien werden ergänzt.</small>}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required={!product} onChange={(e) => setFiles(e.target.files)} /><span>{files?.length ? `${files.length} Bild(er) ausgewählt` : 'Bilder auswählen oder hierher ziehen'}</span><small className="background-removal-note">Neue Bilder werden vor dem Upload lokal im Browser freigestellt. Beim ersten Mal wird dafür ein KI-Modell (ca. 46 MB) geladen; die ausgewählten Originaldateien werden nicht an den Shop übertragen.</small></label>
+    {product && onRefreshBackground && <button type="button" className="secondary-button" disabled={saving || backgroundBusy} onClick={() => { void onRefreshBackground(product) }}>{backgroundBusy ? 'Freistellung wird aktualisiert ...' : 'Bilder-Freistellung aktualisieren'}</button>}
     {error && <div className="form-error">{error}</div>}<button className="primary-button" disabled={saving}>{saving ? processingStatus || 'Wird gespeichert ...' : product ? 'Änderungen speichern' : 'Produkt veröffentlichen'}</button>
   </form>
 }
 
-function SortableProduct({ product, disabled, onEdit, onDelete }: { product: Product; disabled: boolean; onEdit: () => void; onDelete: () => void }) {
+function SortableProduct({ product, disabled, onEdit, onDelete, showDragHandle = true }: { product: Product; disabled: boolean; onEdit?: () => void; onDelete?: () => void; showDragHandle?: boolean }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } = useSortable({ id: product.id, disabled })
   return <article ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={`admin-product ${isDragging ? 'is-dragging' : ''} ${isOver ? 'is-drop-target' : ''}`}>
-    <button className="drag-handle" type="button" disabled={disabled} aria-label={`${product.name} ziehen, um die Position zu ändern`} {...attributes} {...listeners}>⠿</button>
+    {showDragHandle && <button className="drag-handle" type="button" disabled={disabled} aria-label={`${product.name} ziehen, um die Position zu ändern`} {...attributes} {...listeners}>⠿</button>}
     <div className="admin-thumb">{product.images[0] && <img src={product.images[0].url} alt="" />}</div>
     <div className="admin-product-main"><div className="admin-product-title"><h3>{product.name}</h3><span className={`status ${product.status}`}>{product.status === 'active' && product.stock > 0 ? 'Aktiv' : 'Nicht gelistet'}</span></div><p>{product.description}</p><span className="admin-meta">{currency.format(product.priceCents / 100)} · {product.stock} auf Lager · {product.images.length} Bilder</span></div>
-    <div className="admin-product-actions"><button className="edit-button" onClick={onEdit}>Bearbeiten <span>↗</span></button><button className="delete-button" onClick={onDelete}>Löschen</button></div>
+    {onEdit && onDelete && <div className="admin-product-actions"><button className="edit-button" onClick={onEdit}>Bearbeiten <span>↗</span></button><button className="delete-button" onClick={onDelete}>Löschen</button></div>}
   </article>
+}
+
+function ProductOrderManager({ products, onReorder }: { products: Product[]; onReorder: (orderedIds: number[]) => Promise<void> }) {
+  const [orderedProducts, setOrderedProducts] = useState(products)
+  const [error, setError] = useState('')
+  const [draggingProductId, setDraggingProductId] = useState<number | null>(null)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
+  const saveOrder = async ({ active, over }: DragEndEvent) => {
+    setDraggingProductId(null)
+    if (!over || active.id === over.id) return
+    const oldIndex = orderedProducts.findIndex((product) => product.id === active.id)
+    const newIndex = orderedProducts.findIndex((product) => product.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    const previous = orderedProducts
+    const reordered = arrayMove(previous, oldIndex, newIndex)
+    setOrderedProducts(reordered)
+    setError('')
+    try {
+      await onReorder(reordered.map((product) => product.id))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Reihenfolge konnte nicht gespeichert werden.')
+      setOrderedProducts(previous)
+    }
+  }
+  const activeProduct = orderedProducts.find((product) => product.id === draggingProductId)
+  return <section className="admin-section product-order-manager">
+    <p className="reorder-hint">Artikel am Griffpunkt ziehen, um ihre Reihenfolge im Shop zu ändern.</p>
+    {error && <div className="form-error" role="alert">{error}</div>}
+    {orderedProducts.length === 0 ? <div className="admin-empty">Noch keine Produkte vorhanden.</div> : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={({ active }) => setDraggingProductId(Number(active.id))} onDragCancel={() => setDraggingProductId(null)} onDragEnd={(event) => { void saveOrder(event) }}>
+      <SortableContext items={orderedProducts.map((product) => product.id)} strategy={verticalListSortingStrategy}>
+        <div className="admin-list">{orderedProducts.map((product) => <SortableProduct key={product.id} product={product} disabled={false} />)}</div>
+      </SortableContext>
+      <DragOverlay>{activeProduct && <article className="admin-product admin-product-overlay"><div className="drag-handle" aria-hidden="true">⠿</div><div className="admin-thumb">{activeProduct.images[0] && <img src={activeProduct.images[0].url} alt="" />}</div><div className="admin-product-main"><div className="admin-product-title"><h3>{activeProduct.name}</h3><span className={`status ${activeProduct.status}`}>{activeProduct.status === 'active' && activeProduct.stock > 0 ? 'Aktiv' : 'Nicht gelistet'}</span></div><p>{activeProduct.description}</p><span className="admin-meta">{currency.format(activeProduct.priceCents / 100)} · {activeProduct.stock} auf Lager · {activeProduct.images.length} Bilder</span></div></article>}</DragOverlay>
+    </DndContext>}
+  </section>
 }
 
 function SortableCategory({ category, selected, onSelect }: { category: Category; selected: boolean; onSelect: () => void }) {
@@ -592,8 +695,8 @@ function SortableCategory({ category, selected, onSelect }: { category: Category
 }
 
 function CategoryManager({ products }: { products: Product[] }) {
-  const [categories, setCategories] = useState<Category[]>([])
-  const [selectedId, setSelectedId] = useState('')
+  const [categories, setCategories] = useState<Category[]>([allProductsCategory])
+  const [selectedId, setSelectedId] = useState('all-products')
   const [name, setName] = useState('')
   const [newCategoryName, setNewCategoryName] = useState('')
   const [design, setDesign] = useState(categoryDesigns[0])
@@ -606,7 +709,7 @@ function CategoryManager({ products }: { products: Product[] }) {
   const [creating, setCreating] = useState(false)
   const [draggingCategoryId, setDraggingCategoryId] = useState<string | null>(null)
   const [previewImageUrl, setPreviewImageUrl] = useState('')
-  const categoriesRef = useRef(categories)
+  const categoriesRef = useRef<Category[]>([allProductsCategory])
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
   useEffect(() => {
     if (!previewFile) { setPreviewImageUrl(''); return }
@@ -616,10 +719,10 @@ function CategoryManager({ products }: { products: Product[] }) {
   }, [previewFile])
   const load = async () => {
     const next = await request<Category[]>('/api/admin/categories')
-    const loadedCategories = [...next].sort((a, b) => a.sortOrder - b.sortOrder)
+    const loadedCategories = [...(next.some((category) => category.id === 'all-products') ? next : [...next, allProductsCategory])].sort((a, b) => a.sortOrder - b.sortOrder)
     categoriesRef.current = loadedCategories
     setCategories(loadedCategories)
-    if (selectedId && !next.some((category) => category.id === selectedId)) setSelectedId('')
+    if (selectedId && !loadedCategories.some((category) => category.id === selectedId)) setSelectedId('')
   }
   useEffect(() => { void load().catch((reason) => setError(reason instanceof Error ? reason.message : 'Kategorien konnten nicht geladen werden.')) }, [])
   const selected = categories.find((category) => category.id === selectedId)
@@ -738,6 +841,7 @@ function CategoryManager({ products }: { products: Product[] }) {
 
 function ChangeNotes() {
   const entries = [
+    { date: '2026-10-20', title: 'Suche, Produktsortierung und Freistellung verbessert', details: 'Suchansichten zeigen nur noch Treffer und lassen sich per Suchpfeil oder Browser-Zurück verlassen. Im Warenkorb verringert das Minus ab zwei Stück die Menge. Die Produktsortierung liegt separat unter den Kategorien. Freigestellte Produktbilder werden markiert und bei Sammelläufen übersprungen; eine einzelne Produktfreistellung lässt sich gezielt aktualisieren.' },
     { date: '2026-10-20', title: 'Warenkorb und Suche flüssiger bedienbar', details: 'Der Warenkorb öffnet und schließt jetzt mit einem sanften Übergang. Suchergebnisse und Warenkorb-Schaltflächen erscheinen ruhiger; entfernte Artikel blenden sich kurz aus. Die Animationen respektieren die reduzierte Bewegung des Geräts.' },
     { date: '2026-10-20', title: 'Startseite und Warenkorb auf dem Handy verbessert', details: 'Kategorie-Karten stehen auf kleinen Displays zweispaltig und lassen sich vertikal durchscrollen. Produktbilder wechseln mit einer seitlichen Animation. Produkte können direkt in der Liste erhöht oder vollständig aus dem Warenkorb entfernt werden; nicht verfügbare weitere Stücke werden markiert.' },
     { date: '2026-10-20', title: 'Kategorie-Designs individuell anpassen', details: 'Im ausklappbaren Bereich „Größe, Rahmen & Farben“ lassen sich Größe, Rahmen und Farben jeder Kategorie einschließlich „Alle Produkte“ einstellen. Die Vorschau zeigt die Änderungen direkt.' },
@@ -816,13 +920,10 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<Product | 'new' | null>(null)
   const [loginError, setLoginError] = useState('')
-  const [reorderError, setReorderError] = useState('')
   const [loadError, setLoadError] = useState('')
-  const [draggingProductId, setDraggingProductId] = useState<number | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [backgroundJob, setBackgroundJob] = useState<{ running: boolean; completed: number; total: number; errors: string[] } | null>(null)
   const productsRef = useRef(products)
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
   useEffect(() => {
     request('/api/auth/me')
       .then(() => setLoggedIn(true))
@@ -838,19 +939,6 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
   const loadAllProducts = () => request<Product[]>('/api/admin/products')
     .then(setAllProducts)
     .catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Produkte konnten nicht geladen werden.'))
-  const saveProductOrder = async ({ active, over }: DragEndEvent) => {
-    setDraggingProductId(null)
-    if (!over || active.id === over.id) return
-    const previous = productsRef.current
-    const oldIndex = previous.findIndex((product) => product.id === active.id)
-    const newIndex = previous.findIndex((product) => product.id === over.id)
-    if (oldIndex < 0 || newIndex < 0) return
-    const reordered = arrayMove(previous, oldIndex, newIndex)
-    setProductList(reordered)
-    setReorderError('')
-    try { await request('/api/admin/products/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderedIds: reordered.map((product) => product.id) }) }) }
-    catch (error) { setReorderError(error instanceof Error ? error.message : 'Reihenfolge konnte nicht gespeichert werden.'); setProductList(previous) }
-  }
   useEffect(() => {
     if (!loggedIn) return
     setLoadError('')
@@ -859,19 +947,27 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
   }, [loggedIn, search])
   if (loggedIn === null) return <div className="admin-loading">Lade ...</div>
   if (!loggedIn) return <div className="login-page"><button className="back-link" onClick={onExit}>← Zur öffentlichen Seite</button><div className="login-box"><span className="login-symbol">Amspind</span><p className="eyebrow">Produktverwaltung</p><h1>Admin-Anmeldung</h1><p className="login-intro">{orderToken ? 'Diese Bestellung ist nur nach Admin-Anmeldung sichtbar.' : 'Melde dich an, um Produkte und Kategorien zu verwalten.'}</p><form onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); try { await request('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: form.get('username'), password: form.get('password') }) }); setLoggedIn(true) } catch (e) { setLoginError(e instanceof Error ? e.message : 'Login fehlgeschlagen.') } }}><label>Benutzername<input name="username" required defaultValue="admin" /></label><label className="password-field">Passwort<div className="password-input-wrap"><input name="password" type={showPassword ? 'text' : 'password'} required /><button type="button" className="password-toggle" onClick={() => setShowPassword((current) => !current)} aria-label={showPassword ? 'Passwort verbergen' : 'Passwort anzeigen'}>{showPassword ? '🙈' : '👁'}</button></div></label>{loginError && <div className="form-error">{loginError}</div>}<button className="primary-button">Anmelden <span>↗</span></button></form><p className="login-note">Nur für den internen Gebrauch.</p></div></div>
-  const activeProduct = products.find((product) => product.id === draggingProductId)
   const deleteProduct = async (product: Product) => {
     if (!window.confirm(`„${product.name}“ wirklich endgültig löschen? Dieser Vorgang kann nicht rückgängig gemacht werden.`)) return
     try { await request(`/api/admin/products/${product.id}`, { method: 'DELETE' }); await load() }
     catch (reason) { setLoadError(reason instanceof Error ? reason.message : 'Produkt konnte nicht gelöscht werden.') }
   }
-  const removeBackgroundFromAllImages = async () => {
-    const images = allProducts.flatMap((product) => product.images.map((image) => ({ product, image })))
+  const processBackgroundImage = async (product: Product, image: Image) => {
+    const response = await fetch(image.url)
+    if (!response.ok) throw new Error(`Bild konnte nicht geladen werden (HTTP ${response.status}).`)
+    const sourceBlob = await response.blob()
+    const sourceFile = new File([sourceBlob], image.originalName || `produkt-${product.id}-${image.id}`, { type: sourceBlob.type || 'image/png' })
+    const processedFile = await removeImageBackground(sourceFile)
+    const data = new FormData()
+    data.append('image', processedFile)
+    await request(`/api/admin/products/${product.id}/images/${image.id}/background-removal`, { method: 'POST', body: data })
+  }
+  const processBackgroundImages = async (images: { product: Product; image: Image }[], confirmMessage: string) => {
     if (!images.length) {
-      setLoadError('Es wurden keine Produktbilder zum Freistellen gefunden.')
+      setLoadError('Es wurden keine noch nicht freigestellten Produktbilder gefunden.')
       return
     }
-    if (!window.confirm(`Die Hintergründe aller ${images.length} Produktbilder werden automatisch entfernt und die Bilder im Shop ersetzt. Die Originale solltest du lokal aufbewahren. Fortfahren?`)) return
+    if (!window.confirm(confirmMessage)) return
 
     setLoadError('')
     setBackgroundJob({ running: true, completed: 0, total: images.length, errors: [] })
@@ -879,14 +975,7 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
     for (const [index, { product, image }] of images.entries()) {
       setBackgroundJob({ running: true, completed: index, total: images.length, errors: [...errors] })
       try {
-        const response = await fetch(image.url)
-        if (!response.ok) throw new Error(`Bild konnte nicht geladen werden (HTTP ${response.status}).`)
-        const sourceBlob = await response.blob()
-        const sourceFile = new File([sourceBlob], image.originalName || `produkt-${product.id}-${image.id}`, { type: sourceBlob.type || 'image/png' })
-        const processedFile = await removeImageBackground(sourceFile)
-        const data = new FormData()
-        data.append('image', processedFile)
-        await request(`/api/admin/products/${product.id}/images/${image.id}/background-removal`, { method: 'POST', body: data })
+        await processBackgroundImage(product, image)
       } catch (reason) {
         errors.push(`${product.name} — ${image.originalName}: ${reason instanceof Error ? reason.message : 'Freistellen fehlgeschlagen.'}`)
       }
@@ -894,14 +983,22 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
     }
 
     setBackgroundJob({ running: false, completed: images.length, total: images.length, errors })
-    try {
-      await loadAllProducts()
-      await load()
-    } catch (reason) {
-      setLoadError(reason instanceof Error ? reason.message : 'Produktbilder wurden verarbeitet, aber die aktualisierte Liste konnte nicht geladen werden.')
-    }
+    await Promise.all([loadAllProducts(), load()]).catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Produktbilder wurden verarbeitet, aber die aktualisierte Liste konnte nicht geladen werden.'))
   }
-  const productImageCount = allProducts.reduce((total, product) => total + product.images.length, 0)
+  const removeBackgroundFromAllImages = () => {
+    const images = allProducts.flatMap((product) => product.images.filter((image) => !image.backgroundRemoved).map((image) => ({ product, image })))
+    return processBackgroundImages(images, `Die Hintergründe der ${images.length} noch nicht freigestellten Produktbilder werden entfernt. Bereits freigestellte Bilder bleiben unverändert. Fortfahren?`)
+  }
+  const refreshProductBackground = (product: Product) => processBackgroundImages(
+    product.images.map((image) => ({ product, image })),
+    `Die Freistellung aller ${product.images.length} Bilder von „${product.name}“ wird aktualisiert. Fortfahren?`,
+  )
+  const saveProductOrder = async (orderedIds: number[]) => {
+    await request('/api/admin/products/reorder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderedIds }) })
+    const refreshedProducts = await request<Product[]>('/api/admin/products')
+    setAllProducts(refreshedProducts)
+  }
+  const pendingBackgroundImageCount = allProducts.reduce((total, product) => total + product.images.filter((image) => !image.backgroundRemoved).length, 0)
   return <div className="admin-shell">
     <header className="admin-header"><a className="brand admin-brand" href="#"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M10 24h23m-10-11 11 11-11 11" /></svg></span>Amspind</a><div className="admin-title"><strong>Produktverwaltung</strong><span>Amspind</span></div><div className="admin-actions"><button className="text-button" onClick={onExit}>Öffentliche Seite</button><button className="logout" onClick={async () => { await request('/api/auth/logout', { method: 'POST' }); setLoggedIn(false) }}>Abmelden</button></div></header>
     <main className="admin-main">
@@ -911,25 +1008,30 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
           <summary><span className="accordion-summary-copy"><strong>Startseite & Kategorien</strong><small>Kategorien erstellen, sortieren und Produkte zuordnen</small></span></summary>
           <CategoryManager products={allProducts} />
         </details>
-        <details className="admin-accordion products-accordion">
-          <summary><span className="accordion-summary-copy"><strong>Produkte</strong><small>{products.length} Produkte · suchen, bearbeiten und sortieren</small></span></summary>
-        <section className="admin-section product-management-panel"><div className="admin-panel-actions"><p className="reorder-hint">{search ? 'Suche leeren, um die Artikelreihenfolge zu ändern.' : 'Artikel am Griffpunkt ziehen, um sie anzuordnen.'}</p><div className="product-toolbar-actions"><button className="secondary-button" disabled={Boolean(backgroundJob?.running) || productImageCount === 0} onClick={() => { void removeBackgroundFromAllImages() }}>{backgroundJob?.running ? `Freigestellt (${backgroundJob.completed}/${backgroundJob.total})` : `Alle Bilder freistellen · ${productImageCount}`}</button><button className="primary-button compact" onClick={() => setEditing('new')}>+ Produkt hinzufügen</button></div></div>
+          <details className="admin-accordion products-order-accordion">
+            <summary><span className="accordion-summary-copy"><strong>Produktsortierung</strong><small>Reihenfolge der Produkte im Shop festlegen</small></span></summary>
+            <ProductOrderManager key={allProducts.map((product) => `${product.id}-${product.updatedAt}`).join('|')} products={allProducts} onReorder={saveProductOrder} />
+          </details>
+          <details className="admin-accordion products-accordion">
+            <summary><span className="accordion-summary-copy"><strong>Produkte</strong><small>{products.length} Produkte · suchen und bearbeiten</small></span></summary>
+          <section className="admin-section product-management-panel"><div className="admin-panel-actions"><p className="reorder-hint">Produkte verwalten und Bilder bearbeiten.</p><div className="product-toolbar-actions"><button className="secondary-button" disabled={Boolean(backgroundJob?.running) || pendingBackgroundImageCount === 0} onClick={() => { void removeBackgroundFromAllImages() }}>{backgroundJob?.running ? `Freigestellt (${backgroundJob.completed}/${backgroundJob.total})` : `Bilder-Freistellung aktualisieren · ${pendingBackgroundImageCount}`}</button><button className="primary-button compact" onClick={() => setEditing('new')}>+ Produkt hinzufügen</button></div></div>
           {backgroundJob && <div className={`background-job-status ${backgroundJob.errors.length ? 'has-errors' : ''}`} role={backgroundJob.running ? 'status' : 'region'} aria-live="polite"><strong>{backgroundJob.running ? `Bilder werden freigestellt: ${backgroundJob.completed} von ${backgroundJob.total}` : backgroundJob.errors.length ? `Freistellen abgeschlossen: ${backgroundJob.completed - backgroundJob.errors.length} von ${backgroundJob.total} erfolgreich` : `Alle ${backgroundJob.total} Bilder wurden freigestellt.`}</strong>{backgroundJob.running && <progress max={backgroundJob.total} value={backgroundJob.completed} />}{Boolean(backgroundJob.errors.length) && <details><summary>{backgroundJob.errors.length} Bild(er) konnten nicht freigestellt werden</summary><ul>{backgroundJob.errors.slice(0, 20).map((message) => <li key={message}>{message}</li>)}</ul>{backgroundJob.errors.length > 20 && <p>Weitere {backgroundJob.errors.length - 20} Fehler ausgeblendet.</p>}</details>}</div>}
           <div className="admin-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nach Produkt suchen ..." /></label><span>{products.length} Produkte</span></div>
-          {reorderError && <div className="form-error">{reorderError}</div>}{loadError && <div className="form-error" role="alert">{loadError}</div>}
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={({ active }) => setDraggingProductId(Number(active.id))} onDragCancel={() => setDraggingProductId(null)} onDragEnd={(event) => { void saveProductOrder(event) }}>
-            <SortableContext items={products.map((product) => product.id)} strategy={verticalListSortingStrategy}><div className="admin-list">
-              {products.map((product) => <SortableProduct key={product.id} product={product} disabled={Boolean(search)} onEdit={() => setEditing(product)} onDelete={() => { void deleteProduct(product) }} />)}
-              {products.length === 0 && !loadError && <div className="admin-empty">{search ? 'Keine Produkte für diese Suche gefunden.' : 'Noch keine Produkte vorhanden.'}</div>}
-            </div></SortableContext>
-            <DragOverlay>{activeProduct && <article className="admin-product admin-product-overlay"><div className="drag-handle" aria-hidden="true">⠿</div><div className="admin-thumb">{activeProduct.images[0] && <img src={activeProduct.images[0].url} alt="" />}</div><div className="admin-product-main"><div className="admin-product-title"><h3>{activeProduct.name}</h3><span className={`status ${activeProduct.status}`}>{activeProduct.status === 'active' && activeProduct.stock > 0 ? 'Aktiv' : 'Nicht gelistet'}</span></div><p>{activeProduct.description}</p><span className="admin-meta">{currency.format(activeProduct.priceCents / 100)} · {activeProduct.stock} auf Lager · {activeProduct.images.length} Bilder</span></div></article>}</DragOverlay>
+          {loadError && <div className="form-error" role="alert">{loadError}</div>}
+          <DndContext>
+            <SortableContext items={products.map((product) => product.id)} strategy={verticalListSortingStrategy}>
+              <div className="admin-list">
+                {products.map((product) => <SortableProduct key={product.id} product={product} disabled showDragHandle={false} onEdit={() => setEditing(product)} onDelete={() => { void deleteProduct(product) }} />)}
+                {products.length === 0 && !loadError && <div className="admin-empty">{search ? 'Keine Produkte für diese Suche gefunden.' : 'Noch keine Produkte vorhanden.'}</div>}
+              </div>
+            </SortableContext>
           </DndContext>
         </section>
         </details>
         <ChangeNotes />
       </>}
     </main>
-    {editing && <div className="modal-backdrop"><div className="modal"><ProductForm product={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); void load(); void loadAllProducts() }} />{editing !== 'new' && <div className="existing-images"><p className="eyebrow">Bilder verwalten</p><Gallery product={editing} admin onDeleteImage={async (imageId) => { try { await request(`/api/admin/products/${editing.id}/images/${imageId}`, { method: 'DELETE' }); const updated = await request<Product[]>(`/api/admin/products?search=${encodeURIComponent(editing.name)}`); setEditing(updated.find((item) => item.id === editing.id) || editing); void loadAllProducts() } catch (reason) { setLoadError(reason instanceof Error ? reason.message : 'Produktbild konnte nicht gelöscht werden.') } }} /></div>}</div></div>}
+    {editing && <div className="modal-backdrop"><div className="modal"><ProductForm product={editing === 'new' ? undefined : editing} onCancel={() => setEditing(null)} onRefreshBackground={refreshProductBackground} backgroundBusy={Boolean(backgroundJob?.running)} onSaved={() => { setEditing(null); void load(); void loadAllProducts() }} />{editing !== 'new' && <div className="existing-images"><p className="eyebrow">Bilder verwalten</p><Gallery product={editing} admin onDeleteImage={async (imageId) => { try { await request(`/api/admin/products/${editing.id}/images/${imageId}`, { method: 'DELETE' }); const updated = await request<Product[]>(`/api/admin/products?search=${encodeURIComponent(editing.name)}`); setEditing(updated.find((item) => item.id === editing.id) || editing); void loadAllProducts() } catch (reason) { setLoadError(reason instanceof Error ? reason.message : 'Produktbild konnte nicht gelöscht werden.') } }} /></div>}</div></div>}
   </div>
 }
 

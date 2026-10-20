@@ -79,6 +79,7 @@ nav a:hover { color: var(--ink); }
 .gallery-arrow.left { left: 14px; }
 .gallery-arrow.right { right: 14px; }
 .image-count { position: absolute; right: 15px; bottom: 15px; padding: 6px 9px; color: #fff; background: rgba(13,35,66,0.72); font: 10px var(--mono); border-radius: 999px; }
+.background-removed-badge { position: absolute; top: 12px; left: 12px; padding: 6px 9px; border-radius: 999px; background: rgba(255,255,255,.94); color: #247044; font: 10px var(--mono); box-shadow: 0 3px 10px rgba(13,35,66,.1); }
 .thumbnails { display: flex; gap: 7px; padding-top: 10px; overflow-x: auto; }
 .thumbnail-wrap { position: relative; }
 .thumbnail { width: 60px; height: 60px; padding: 0; border: 1px solid var(--line); background: #fff; border-radius: 10px; overflow: hidden; }
@@ -187,6 +188,8 @@ textarea { resize: vertical; min-height: 110px; }
 .shop-search:focus-within { box-shadow: 0 0 0 4px rgba(241,135,50,.16); }
 .shop-search input { transition: background-color .18s ease; }
 .shop-search button { width: 52px; flex: 0 0 52px; border: 0; background: var(--accent); color: #fff; font-size: 24px; }
+.shop-search .search-back-button { width: 42px; flex-basis: 42px; background: #fff; color: var(--brand-blue); font-size: 20px; }
+.shop-search .search-back-button:hover { background: #f4f7fa; color: var(--accent-hover); }
 .shop-search button:hover, .add-cart-button:hover { background: var(--accent-hover); }
 .site-header nav { gap: 18px; }
 .public-shell .site-header .cart-button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; border: 0; background: transparent; color: #fff; font-size: 12px; font-weight: 600; white-space: nowrap; }
@@ -454,6 +457,7 @@ textarea { resize: vertical; min-height: 110px; }
 .admin-accordion .category-manager { margin: 0; }
 .category-manager .category-admin-layout { gap: 16px; }
 .products-accordion > summary { min-height: 76px; }
+.product-order-manager > .reorder-hint { margin: 0 0 12px; }
 .admin-main > .admin-intro { margin-bottom: 24px; }
 .admin-panel-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 12px; }
 .admin-panel-actions .reorder-hint { margin: 0; }
