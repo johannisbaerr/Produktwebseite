@@ -136,12 +136,16 @@ function matchesSearch(product: Product, categoryNames: string[], search: string
 
 function Gallery({ product, admin = false, priority = false, onDeleteImage }: { product: Product; admin?: boolean; priority?: boolean; onDeleteImage?: (imageId: number) => void }) {
   const [selected, setSelected] = useState(0)
-  const startX = useRef<number | null>(null)
+  const [direction, setDirection] = useState(1)
+  const startTouch = useRef<{ x: number; y: number } | null>(null)
   const image = product.images[selected]
-  const move = (direction: number) => setSelected((current) => (current + direction + product.images.length) % product.images.length)
+  const move = (nextDirection: number) => {
+    setDirection(nextDirection)
+    setSelected((current) => (current + nextDirection + product.images.length) % product.images.length)
+  }
   useEffect(() => setSelected((current) => Math.min(current, Math.max(0, product.images.length - 1))), [product.images.length])
-  return <div className="gallery"><div className="gallery-main" onTouchStart={(event) => { startX.current = event.touches[0].clientX }} onTouchEnd={(event) => { if (startX.current === null) return; const distance = event.changedTouches[0].clientX - startX.current; if (Math.abs(distance) > 35) move(distance > 0 ? -1 : 1); startX.current = null }}>
-    {image ? <img src={image.url} alt={product.name} loading={priority ? 'eager' : 'lazy'} decoding="async" fetchPriority={priority ? 'high' : 'auto'} /> : <div className="image-placeholder">Kein Bild</div>}
+  return <div className="gallery"><div className="gallery-main" onTouchStart={(event) => { startTouch.current = { x: event.touches[0].clientX, y: event.touches[0].clientY } }} onTouchEnd={(event) => { if (startTouch.current === null) return; const distanceX = event.changedTouches[0].clientX - startTouch.current.x; const distanceY = event.changedTouches[0].clientY - startTouch.current.y; if (Math.abs(distanceX) > 35 && Math.abs(distanceX) > Math.abs(distanceY)) move(distanceX > 0 ? -1 : 1); startTouch.current = null }}>
+    {image ? <img key={image.url} className="gallery-current-image" style={{ '--slide-offset': direction > 0 ? '28px' : '-28px' } as CSSProperties} src={image.url} alt={product.name} loading={priority ? 'eager' : 'lazy'} decoding="async" fetchPriority={priority ? 'high' : 'auto'} /> : <div className="image-placeholder">Kein Bild</div>}
     {product.images.length > 1 && <><button className="gallery-arrow left" aria-label="Vorheriges Bild" onClick={() => move(-1)}>←</button><button className="gallery-arrow right" aria-label="Nächstes Bild" onClick={() => move(1)}>→</button></>}
     <span className="image-count">{product.images.length ? `${selected + 1} / ${product.images.length}` : '0 Bilder'}</span>
   </div>{product.images.length > 1 && <div className="thumbnails">{product.images.map((item, index) => <div className={`thumbnail-wrap ${index === selected ? 'selected' : ''}`} key={item.id}><button className="thumbnail" onClick={() => setSelected(index)}><img src={item.url} alt={`${product.name} Ansicht ${index + 1}`} loading="lazy" decoding="async" /></button>{admin && onDeleteImage && <button className="thumbnail-remove" onClick={() => onDeleteImage(item.id)} aria-label="Bild entfernen">×</button>}</div>)}</div>}</div>
@@ -150,9 +154,14 @@ function Gallery({ product, admin = false, priority = false, onDeleteImage }: { 
 function CategoryPreview({ category, products }: { category: Category; products: Product[] }) {
   const images = [...new Set(products.flatMap((product) => product.images.map((image) => image.url)))]
   const [active, setActive] = useState(0)
-  const touchStart = useRef<number | null>(null)
+  const [direction, setDirection] = useState(1)
+  const touchStart = useRef<{ x: number; y: number } | null>(null)
+  const didSwipe = useRef(false)
   const moveImage = (direction: number) => {
-    if (images.length > 1) setActive((current) => (current + direction + images.length) % images.length)
+    if (images.length > 1) {
+      setDirection(direction)
+      setActive((current) => (current + direction + images.length) % images.length)
+    }
   }
   useEffect(() => {
     setActive(0)
@@ -163,17 +172,25 @@ function CategoryPreview({ category, products }: { category: Category; products:
   if (category.previewMode === 'upload') return <div className={`category-preview single-image ${category.design.toLowerCase()}`}>{category.previewImageUrl ? <img className="preview-active" src={category.previewImageUrl} alt="" /> : <span className="category-preview-empty">Bild auswählen</span>}</div>
   if (!images.length) return <div className={`category-preview category-preview-empty ${category.design.toLowerCase()}`}>Amspind</div>
   return <div className={`category-preview single-image ${category.design.toLowerCase()}`}
-    onTouchStart={(event) => { touchStart.current = event.touches[0].clientX }}
+    onTouchStart={(event) => { didSwipe.current = false; touchStart.current = { x: event.touches[0].clientX, y: event.touches[0].clientY } }}
     onTouchEnd={(event) => {
       if (touchStart.current === null) return
-      const distance = event.changedTouches[0].clientX - touchStart.current
-      if (Math.abs(distance) > 35) {
-        event.preventDefault()
-        moveImage(distance > 0 ? -1 : 1)
+      const distanceX = event.changedTouches[0].clientX - touchStart.current.x
+      const distanceY = event.changedTouches[0].clientY - touchStart.current.y
+      if (Math.abs(distanceX) > 35 && Math.abs(distanceX) > Math.abs(distanceY)) {
+        didSwipe.current = true
+        moveImage(distanceX > 0 ? -1 : 1)
       }
       touchStart.current = null
+    }}
+    onClick={(event) => {
+      if (didSwipe.current) {
+        event.preventDefault()
+        event.stopPropagation()
+        didSwipe.current = false
+      }
     }}>
-    <img key={images[active % images.length]} className="preview-active" src={images[active % images.length]} alt="" />
+    <img key={images[active % images.length]} className="preview-active" style={{ '--slide-offset': direction > 0 ? '28px' : '-28px' } as CSSProperties} src={images[active % images.length]} alt="" />
     {images.length > 1 && <span className="category-image-count">{active + 1} / {images.length}</span>}
   </div>
 }
@@ -223,11 +240,13 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const [search, setSearch] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('')
   const [cart, setCart] = useState<CartItem[]>(readCart)
+  const [addedProductId, setAddedProductId] = useState<number | null>(null)
   const [cartOpen, setCartOpen] = useState(false)
   const [clearCartPrompt, setClearCartPrompt] = useState(false)
   const [shareLink, setShareLink] = useState('')
   const [cartError, setCartError] = useState('')
   const categoryCardsRef = useRef<HTMLDivElement>(null)
+  const addedProductTimer = useRef<number | null>(null)
   const isFullCatalog = selectedCategory === 'all-products'
   const sortedCategories = useMemo(() => {
     const withAllProducts = categories.some((category) => category.id === 'all-products') ? categories : [...categories, allProductsCategory]
@@ -329,24 +348,34 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   useEffect(() => {
     try { localStorage.setItem(cartStorageKey, JSON.stringify(cart)) } catch { setCartError('Der Warenkorb kann in diesem Browser nicht gespeichert werden.') }
   }, [cart])
+  useEffect(() => () => {
+    if (addedProductTimer.current !== null) window.clearTimeout(addedProductTimer.current)
+  }, [])
 
   const addToCart = (product: Product) => {
+    const existing = cart.find((item) => item.productId === product.id)
+    if ((existing?.quantity || 0) >= product.stock) {
+      setCartError(`Nicht genug auf Lager: ${product.name}`)
+      return
+    }
+    setCartError('')
+    setShareLink('')
     setCart((items) => {
       const existing = items.find((item) => item.productId === product.id)
-      if ((existing?.quantity || 0) >= product.stock) {
-        setCartError('Die verfügbare Stückzahl liegt bereits im Warenkorb.')
-        return items
-      }
-      setCartError('')
+      if ((existing?.quantity || 0) >= product.stock) return items
       return existing
         ? items.map((item) => item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item)
         : [...items, { productId: product.id, quantity: 1 }]
     })
+    setAddedProductId(product.id)
+    if (addedProductTimer.current !== null) window.clearTimeout(addedProductTimer.current)
+    addedProductTimer.current = window.setTimeout(() => setAddedProductId(null), 700)
   }
 
   const changeQuantity = (productId: number, quantity: number) => {
     const product = products.find((item) => item.id === productId)
     if (quantity < 1) {
+      setShareLink('')
       setCart((items) => items.filter((item) => item.productId !== productId))
       return
     }
@@ -355,6 +384,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       return
     }
     setCartError('')
+    setShareLink('')
     setCart((items) => items.map((item) => item.productId === productId ? { ...item, quantity } : item))
   }
 
@@ -408,7 +438,22 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       {(selectedCategory || search) && <section className={`collection ${isFullCatalog ? 'full-catalog' : ''}`} id="collection"><div className="section-heading"><div><p className="eyebrow">{search ? 'Suchergebnisse' : 'Die aktuelle Auswahl'}</p><h2>{sortedCategories.find((category) => category.id === selectedCategory)?.name || 'Alle Produkte'}</h2></div><button className="back-to-categories" onClick={() => { setSelectedCategory(''); setSearch(''); setCartError(''); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>← Kategorien</button><span className="product-total">{visibleProducts.length.toString().padStart(2, '0')} Artikel</span></div>
         {loading ? <div className="loading">Produkte werden geladen ...</div> : loadError ? <div className="loading" role="alert">{loadError}</div> : visibleProducts.length === 0 ? <div className="empty-public"><span>○</span><h3>{search ? 'Keine passenden Produkte gefunden' : 'Demnächst hier'}</h3><p>{search ? 'Versuche einen anderen Suchbegriff.' : 'Diese Auswahl wird gerade vorbereitet.'}</p></div> : <div className="product-grid">{visibleProducts.map((product, index) => <article className="product-card" key={product.id} style={{ animationDelay: `${Math.min(index * 35, 105)}ms` }}>
           <Gallery product={product} priority={index < 2} /><div className="product-info"><div><h3>{product.name}</h3><p>{product.description}</p></div><div className="product-price"><strong>{currency.format(product.priceCents / 100)}</strong><span className="stock-indicator">{product.stock} auf Lager</span></div></div>
-          <button className="add-cart-button" onClick={() => addToCart(product)}>In den Warenkorb</button>
+          {(() => {
+            const quantity = cart.find((item) => item.productId === product.id)?.quantity || 0
+            const atStockLimit = quantity >= product.stock
+            return quantity > 0
+              ? <div className={`product-cart-actions ${addedProductId === product.id ? 'just-added' : ''}`} aria-live="polite">
+                <span className="add-cart-button in-cart" role="status">Im Warenkorb{quantity > 1 ? ` · ${quantity}` : ''} ✓</span>
+                <button className="product-cart-icon-button" disabled={atStockLimit} title={atStockLimit ? 'Nicht genug auf Lager' : 'Weiteres Produkt hinzufügen'} aria-label={atStockLimit ? 'Nicht genug auf Lager' : 'Weiteres Produkt hinzufügen'} onClick={() => addToCart(product)}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                </button>
+                <button className="product-cart-icon-button remove-from-cart" title="Aus dem Warenkorb entfernen" aria-label="Aus dem Warenkorb entfernen" onClick={() => changeQuantity(product.id, 0)}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg>
+                </button>
+                {atStockLimit && <span className="stock-limit-hint" role="status">Nicht genug auf Lager</span>}
+              </div>
+              : <button className={`add-cart-button ${addedProductId === product.id ? 'just-added' : ''}`} disabled={product.stock <= 0} title={product.stock <= 0 ? 'Nicht genug auf Lager' : undefined} onClick={() => addToCart(product)}>{product.stock > 0 ? 'In den Warenkorb' : 'Nicht genug auf Lager'}</button>
+          })()}
         </article>)}</div>}
       </section>}
     </main>
@@ -654,6 +699,7 @@ function CategoryManager({ products }: { products: Product[] }) {
 
 function ChangeNotes() {
   const entries = [
+    { date: '2026-10-20', title: 'Startseite und Warenkorb auf dem Handy verbessert', details: 'Kategorie-Karten stehen auf kleinen Displays zweispaltig und lassen sich vertikal durchscrollen. Produktbilder wechseln mit einer seitlichen Animation. Produkte können direkt in der Liste erhöht oder vollständig aus dem Warenkorb entfernt werden; nicht verfügbare weitere Stücke werden markiert.' },
     { date: '2026-10-20', title: 'Kategorie-Designs individuell anpassen', details: 'Im ausklappbaren Bereich „Größe, Rahmen & Farben“ lassen sich Größe, Rahmen und Farben jeder Kategorie einschließlich „Alle Produkte“ einstellen. Die Vorschau zeigt die Änderungen direkt.' },
     { date: '2026-10-20', title: 'Produktbilder gesammelt freistellen', details: 'Im Produktbereich können alle vorhandenen Produktbilder nacheinander lokal im Browser freigestellt werden. Erfolgreich bearbeitete Shop-Bilder werden ersetzt; Fehler einzelner Bilder bleiben sichtbar.' },
     { date: '2026-10-20', title: '„Alle Produkte“ im Admin bearbeiten', details: '„Alle Produkte“ kann jetzt im Kategorie-Editor ausgewählt und im Design geändert werden. Einstellungen, die für die feste Kategorie nicht verfügbar sind, werden deaktiviert angezeigt.' },
