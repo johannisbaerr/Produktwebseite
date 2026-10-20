@@ -290,6 +290,8 @@ textarea { resize: vertical; min-height: 110px; }
 .category-promo-card .category-preview.kompakt { inset: 18px 18px auto; width: auto; height: 43%; overflow: hidden; border: 1px solid rgba(19,35,54,.12); border-radius: 12px; background: rgba(255,255,255,.5); }
 .category-promo-card .category-preview-empty { color: #2b4860; }
 .category-preview.category-preview-empty { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+.category-fallback-mark { display: grid; place-items: center; width: 72px; height: 72px; border: 1px solid rgba(19,35,54,.1); border-radius: 20px; background: #102f4a; color: var(--accent); box-shadow: 0 10px 28px rgba(13,35,66,.14); }
+.category-fallback-mark svg { width: 48px; height: 48px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 5; }
 .category-promo-card .category-preview.single-image { display: block; }
 .category-promo-card .category-preview.single-image { touch-action: pan-y; }
 .category-promo-card .category-preview.single-image::after { position: absolute; inset: 35% 0 0; content: ""; background: linear-gradient(180deg, transparent, rgba(16,31,43,.55)); pointer-events: none; }
@@ -305,7 +307,7 @@ textarea { resize: vertical; min-height: 110px; }
 .category-promo-card.all-products-category .category-promo-copy p { color: #5d6d7d; opacity: 1; }
 .category-promo-card.all-products-category .category-promo-link { border-color: #d9e1e7; background: #fff; color: #173f63; }
 .category-image-count { position: absolute; z-index: 2; top: 14px; right: 14px; padding: 5px 9px; border: 1px solid rgba(19,35,54,.12); border-radius: 999px; background: rgba(255,255,255,.82); color: #20364a; font-size: 11px; font-weight: 600; }
-.category-promo-card .category-preview-empty { align-content: center; justify-content: center; padding-bottom: 110px; font-size: 28px; }
+.category-promo-card .category-preview-empty { align-content: center; justify-content: center; padding-bottom: 110px; }
 .category-empty { display: grid; gap: 8px; min-height: 260px; align-content: center; justify-items: center; border: 1px dashed #cbd5dd; border-radius: 18px; background: #fff; color: var(--ink); text-align: center; }
 .category-empty span { color: var(--muted); font-size: 14px; }
 .category-promo-link { display: inline-flex; align-items: center; gap: 10px; width: fit-content; margin-top: 14px; padding: 10px 14px; border: 1px solid rgba(20,40,58,.17); border-radius: 999px; background: rgba(255,255,255,.84); font-size: 12px; font-weight: 700; }

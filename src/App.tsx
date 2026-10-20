@@ -165,6 +165,10 @@ function Gallery({ product, admin = false, priority = false, onDeleteImage, dele
   </div>{product.images.length > 1 && <div className="thumbnails">{product.images.map((item, index) => <div className={`thumbnail-wrap ${index === selected ? 'selected' : ''}`} key={item.id}><button className="thumbnail" onClick={() => setSelected(index)}><img src={item.url} alt={`${product.name} Ansicht ${index + 1}`} loading="lazy" decoding="async" /></button>{admin && onDeleteImage && <button className="thumbnail-remove" disabled={deletingImageId === item.id} onClick={() => onDeleteImage(item.id)} aria-label={deletingImageId === item.id ? 'Bild wird gelöscht' : 'Bild entfernen'}>{deletingImageId === item.id ? '…' : '×'}</button>}</div>)}</div>}</div>
 }
 
+function CategoryFallbackLogo() {
+  return <span className="category-fallback-mark" aria-label="Amspind"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M10 24h23m-10-11 11 11-11 11" /></svg></span>
+}
+
 function CategoryPreview({ category, products }: { category: Category; products: Product[] }) {
   const images = [...new Set(products.flatMap((product) => product.images.map((image) => image.url)))]
   const [active, setActive] = useState(0)
@@ -183,8 +187,10 @@ function CategoryPreview({ category, products }: { category: Category; products:
     const timer = window.setInterval(() => moveImage(1), 3500)
     return () => window.clearInterval(timer)
   }, [category.id, category.previewMode, images.length])
-  if (category.previewMode === 'upload') return <div className={`category-preview single-image ${category.design.toLowerCase()}`}>{category.previewImageUrl ? <img className="preview-active" src={category.previewImageUrl} alt="" /> : <span className="category-preview-empty">Bild auswählen</span>}</div>
-  if (!images.length) return <div className={`category-preview category-preview-empty ${category.design.toLowerCase()}`}>Amspind</div>
+  if (category.previewMode === 'upload') return category.previewImageUrl
+    ? <div className={`category-preview single-image ${category.design.toLowerCase()}`}><img className="preview-active" src={category.previewImageUrl} alt="" /></div>
+    : <div className={`category-preview category-preview-empty ${category.design.toLowerCase()}`}><CategoryFallbackLogo /></div>
+  if (!images.length) return <div className={`category-preview category-preview-empty ${category.design.toLowerCase()}`}><CategoryFallbackLogo /></div>
   return <div className={`category-preview single-image ${category.design.toLowerCase()}`}
     onTouchStart={(event) => { didSwipe.current = false; touchStart.current = { x: event.touches[0].clientX, y: event.touches[0].clientY } }}
     onTouchEnd={(event) => {
@@ -214,7 +220,7 @@ function CategoryDesignPreview({ category, products }: { category: Category; pro
     <p className="category-preview-heading">Vorschau der Kategorie</p>
     <div className="category-promo-card" style={categoryCardStyle(category.designSettings)}>
       <CategoryPreview category={category} products={products} />
-      <div className="category-promo-copy"><span className="category-promo-kicker">Amspind Auswahl</span><h2>{category.name || 'Kategoriename'}</h2><p>{products.length} {products.length === 1 ? 'Produkt' : 'Produkte'} für deine Pause</p><span className="category-promo-link">Jetzt entdecken <span aria-hidden="true">→</span></span></div>
+      <div className="category-promo-copy"><h2>{category.name || 'Kategoriename'}</h2></div>
     </div>
     <span className="category-preview-design-label">Design: {category.design}</span>
   </div>
@@ -609,7 +615,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
           const categoryProducts = category.id === 'all-products' ? products : products.filter((product) => category.productIds.includes(product.id))
           return <button key={category.id} className={`category-promo-card ${category.id === 'all-products' ? 'all-products-category' : ''}`} style={categoryCardStyle(category.designSettings || defaultCategoryDesignSettings)} onClick={() => selectCategory(category.id)}>
             <CategoryPreview category={category} products={categoryProducts} />
-            <div className="category-promo-copy"><span className="category-promo-kicker">Amspind Auswahl</span><h2>{category.name}</h2><p>{categoryProducts.length} {categoryProducts.length === 1 ? 'Produkt' : 'Produkte'} für deine Pause</p><span className="category-promo-link">Jetzt entdecken <span aria-hidden="true">→</span></span></div>
+            <div className="category-promo-copy"><h2>{category.name}</h2></div>
           </button>
         })}</div></> : <div className="category-empty"><strong>Deine Auswahl wird vorbereitet</strong><span>Bald findest du hier die Kategorien aus dem Spind.</span></div>}</>}
       </section>}
@@ -640,7 +646,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
         </article>)}</div>}
       </section>}
     </main>
-    {!isFullCatalog && <footer><span>Amspind <small>Dein Spind, deine Auswahl.</small></span><span>© {new Date().getFullYear()}</span></footer>}
+    {!isFullCatalog && <footer><span>Amspind</span><span>© {new Date().getFullYear()}</span></footer>}
     {cartOpen && <div className={`cart-backdrop ${cartClosing ? 'closing' : ''}`} onMouseDown={(event) => { if (event.target === event.currentTarget) closeCart() }}>{cartHeader}<section className={`cart-panel ${cartClosing ? 'closing' : ''}`} role="dialog" aria-modal="true" aria-labelledby="cart-title">
       <div className="cart-page-title"><p className="eyebrow">Deine Auswahl</p><h2 id="cart-title">Warenkorb <span>({cartCount} Artikel)</span></h2></div>
       <div className="cart-page-content">
@@ -661,7 +667,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       {shareLink && <label className="share-link-field">Bestelllink<input readOnly value={shareLink} onFocus={(event) => event.currentTarget.select()} /></label>}
       {cartError && cart.length > 0 && <div className="form-error" role="alert">{cartError}</div>}
       <button className="primary-button" disabled={!cart.length} onClick={() => { void createShareableOrder() }}>{shareLink ? 'Bestelllink kopieren / teilen' : 'Bestellung teilen'}</button>
-      <p className="cart-note">Die Bestelldetails sind nur nach Admin-Anmeldung sichtbar.</p>
+      <p className="cart-note">Die Bestelldetails sind nur für Admins sichtbar.</p>
       </aside>
       </div>
     </section></div>}
