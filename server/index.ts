@@ -245,11 +245,11 @@ app.post('/api/admin/categories/reorder', auth, async (req, res) => {
   if (!Array.isArray(orderedIds) || orderedIds.some((id) => typeof id !== 'string') || new Set(orderedIds).size !== orderedIds.length) {
     return res.status(400).json({ error: 'Ungültige Kategorienreihenfolge.' })
   }
-  const { data: categories, error } = await supabase.from('categories').select('id').neq('id', 'all-products')
+  const { data: categories, error } = await supabase.from('categories').select('id')
   if (error) return res.status(500).json({ error: 'Kategorien konnten nicht geladen werden.' })
   const currentIds = (categories || []).map((category) => category.id)
   if (orderedIds.length !== currentIds.length || orderedIds.some((id) => !currentIds.includes(id))) return res.status(400).json({ error: 'Ungültige Kategorienreihenfolge.' })
-  const updates = await Promise.all(orderedIds.map((id, index) => supabase.from('categories').update({ sort_order: index + 1 }).eq('id', id)))
+  const updates = await Promise.all(orderedIds.map((id, index) => supabase.from('categories').update({ sort_order: index }).eq('id', id)))
   if (updates.some(({ error: updateError }) => updateError)) return res.status(500).json({ error: 'Kategorienreihenfolge konnte nicht gespeichert werden.' })
   res.json({ ok: true })
 })

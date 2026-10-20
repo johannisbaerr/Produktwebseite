@@ -166,6 +166,17 @@ function CategoryPreview({ category, products }: { category: Category; products:
   </div>
 }
 
+function CategoryDesignPreview({ category, products }: { category: Category; products: Product[] }) {
+  return <div className="category-design-preview">
+    <p className="category-preview-heading">Vorschau der Kategorie</p>
+    <div className="category-promo-card">
+      <CategoryPreview category={category} products={products} />
+      <div className="category-promo-copy"><span className="category-promo-kicker">Amspind Auswahl</span><h2>{category.name || 'Kategoriename'}</h2><p>{products.length} {products.length === 1 ? 'Produkt' : 'Produkte'} für deine Pause</p><span className="category-promo-link">Jetzt entdecken <span aria-hidden="true">→</span></span></div>
+    </div>
+    <span className="category-preview-design-label">Design: {category.design}</span>
+  </div>
+}
+
 function StorefrontHeader({ cartCount, search, onSearchChange, onSearch, onCart, onAdmin }: {
   cartCount: number
   search: string
@@ -206,7 +217,10 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
   const [cartError, setCartError] = useState('')
   const categoryCardsRef = useRef<HTMLDivElement>(null)
   const isFullCatalog = selectedCategory === 'all-products'
-  const sortedCategories = useMemo(() => [allProductsCategory, ...categories.filter((category) => category.id !== 'all-products').sort((a, b) => a.sortOrder - b.sortOrder)], [categories])
+  const sortedCategories = useMemo(() => {
+    const withAllProducts = categories.some((category) => category.id === 'all-products') ? categories : [...categories, allProductsCategory]
+    return [...withAllProducts].sort((a, b) => a.sortOrder - b.sortOrder)
+  }, [categories])
   const displayCategories = sortedCategories
   const categoriesForProduct = (product: Product) => sortedCategories.filter((category) => category.id !== 'all-products' && category.productIds.includes(product.id)).map((category) => category.name)
   const visibleProducts = useMemo(() => products.filter((product) => {
@@ -464,7 +478,9 @@ function SortableCategory({ category, selected, onSelect }: { category: Category
   const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } = useSortable({ id: category.id })
   return <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={`category-admin-row ${selected ? 'selected' : ''} ${isDragging ? 'is-dragging' : ''} ${isOver ? 'is-drop-target' : ''}`}>
     <button className="drag-handle category-drag-handle" type="button" aria-label={`${category.name} ziehen, um die Position zu ändern`} {...attributes} {...listeners}>⠿</button>
-    <button className="category-select" type="button" onClick={onSelect}>{category.name}</button>
+    {category.id === 'all-products'
+      ? <><span className="category-select category-fixed-name">{category.name}</span><span className="category-fixed-label">Fest</span></>
+      : <button className="category-select" type="button" onClick={onSelect}>{category.name}</button>}
   </div>
 }
 
@@ -481,11 +497,18 @@ function CategoryManager({ products }: { products: Product[] }) {
   const [busy, setBusy] = useState(false)
   const [creating, setCreating] = useState(false)
   const [draggingCategoryId, setDraggingCategoryId] = useState<string | null>(null)
+  const [previewImageUrl, setPreviewImageUrl] = useState('')
   const categoriesRef = useRef(categories)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
+  useEffect(() => {
+    if (!previewFile) { setPreviewImageUrl(''); return }
+    const objectUrl = URL.createObjectURL(previewFile)
+    setPreviewImageUrl(objectUrl)
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [previewFile])
   const load = async () => {
     const next = await request<Category[]>('/api/admin/categories')
-    const loadedCategories = next.filter((category) => category.id !== 'all-products')
+    const loadedCategories = [...next].sort((a, b) => a.sortOrder - b.sortOrder)
     categoriesRef.current = loadedCategories
     setCategories(loadedCategories)
     if (selectedId && !next.some((category) => category.id === selectedId)) setSelectedId('')
@@ -550,10 +573,20 @@ function CategoryManager({ products }: { products: Product[] }) {
     try { await request(`/api/admin/categories/${selected.id}`, { method: 'DELETE' }); setSelectedId(''); await load() }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Kategorie konnte nicht gelöscht werden.') }
   }
+  const previewCategory: Category = {
+    id: selected?.id || 'category-preview',
+    name,
+    sortOrder: selected?.sortOrder ?? categories.length,
+    design,
+    previewMode,
+    previewImageUrl: previewFile ? previewImageUrl || selected?.previewImageUrl || null : selected?.previewImageUrl || null,
+    productIds: selectedProducts,
+  }
+  const previewProducts = products.filter((product) => selectedProducts.includes(product.id))
   return <section className="admin-section category-manager">
-    <div className="category-admin-layout"><div className="category-admin-list"><div className="category-list-heading"><strong>Kategorien</strong><span>{categories.length} Kategorien</span></div><div className="fixed-category"><span className="category-static-icon">—</span><span className="category-static-name">Alle Produkte</span><span className="category-fixed-label">Fest</span></div>
+    <div className="category-admin-layout"><div className="category-admin-list"><div className="category-list-heading"><strong>Kategorien</strong><span>{Math.max(0, categories.length - 1)} Kategorien</span></div>
       {error && <div className="form-error" role="alert">{error}</div>}
-      <p className="reorder-hint">Kategorien am Griffpunkt ziehen, um sie anzuordnen.</p>
+      <p className="reorder-hint">Alle Kategorien einschließlich „Alle Produkte“ am Griffpunkt ziehen, um sie anzuordnen.</p>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={({ active }) => setDraggingCategoryId(String(active.id))} onDragCancel={() => setDraggingCategoryId(null)} onDragEnd={(event) => { void saveCategoryOrder(event) }}>
         <SortableContext items={categories.map((category) => category.id)} strategy={verticalListSortingStrategy}>
           <div className="category-sortable-list">{categories.map((category) => <SortableCategory key={category.id} category={category} selected={category.id === selectedId} onSelect={() => setSelectedId(category.id)} />)}</div>
@@ -564,7 +597,8 @@ function CategoryManager({ products }: { products: Product[] }) {
     </div>
       <div className="category-editor">{selected ? <>
         <label>Kategoriename<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label>
-        <label>Design<select value={design} onChange={(event) => setDesign(event.target.value)}>{categoryDesigns.map((option) => <option key={option} value={option}>{option}</option>)}</select><small>Die auswählbaren Designs werden später visuell ausgestaltet.</small></label>
+        <label>Design<select value={design} onChange={(event) => setDesign(event.target.value)}>{categoryDesigns.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
+        <CategoryDesignPreview category={previewCategory} products={previewProducts} />
         <label>Vorschaubild<select value={previewMode} onChange={(event) => setPreviewMode(event.target.value as 'products' | 'upload')}><option value="products">Aus Produktbildern wechseln</option><option value="upload">Eigenes Bild hochladen</option></select></label>
         {previewMode === 'upload' && <label className="file-drop">Kategorie-Bild<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => setPreviewFile(event.target.files?.[0] || null)} /><span>{previewFile?.name || (selected.previewImageUrl ? 'Bild vorhanden – neues Bild auswählen zum Ersetzen' : 'Bild auswählen')}</span></label>}
         <fieldset className="product-picker"><legend>Produkte dieser Kategorie</legend>{products.length ? products.map((product) => <label key={product.id} className="product-choice"><input type="checkbox" checked={selectedProducts.includes(product.id)} onChange={(event) => setSelectedProducts((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} /><span>{product.name} <small>{product.status === 'unlisted' ? '· Nicht gelistet (öffentlich ausgeblendet)' : ''}</small></span></label>) : <p className="muted">Noch keine Produkte angelegt.</p>}</fieldset>
@@ -575,6 +609,7 @@ function CategoryManager({ products }: { products: Product[] }) {
 
 function ChangeNotes() {
   const entries = [
+    { date: '2026-10-20', title: 'Kategorien sortieren und Designs vorab ansehen', details: '„Alle Produkte“ kann jetzt zusammen mit den übrigen Kategorien per Drag-and-drop sortiert werden. Der Kategorieneditor zeigt eine Live-Vorschau für Kachel, Panorama und Kompakt; Admin-Interaktionen erhielten dezente Hover- und Fokus-Effekte.' },
     { date: '2026-10-19', title: 'Zurücknavigation und Admin-Bereiche verbessert', details: 'Der Handy-Zurückknopf schließt den Warenkorb und stellt die vorherige Ansicht wieder her. Die öffentliche Startseite blendet keine Kategorien-Warnung mehr ein, solange die vorhandene Kategorieansicht weiter nutzbar ist. Admin-Bereiche sind jetzt aufklappbar strukturiert.' },
     { date: '2026-10-19', title: 'Kategorien im Admin zuverlässiger anlegen', details: 'Beim Erstellen einer Kategorie werden Datenbankfehler jetzt protokolliert und fehlende Shop-Migrationen verständlich gemeldet. Nach erfolgreichem Anlegen erscheint die Kategorie direkt in der Liste.' },
     { date: '2026-10-19', title: 'Produktliste und Logo überarbeitet', details: 'Produktauflistungen sind jetzt klare, breite Zeilen mit Bild links, gut lesbaren Produktdetails und eigener Warenkorb-Schaltfläche. „Alle Produkte“ öffnet eine vollständige Ansicht statt die Liste unter den Kategorien auszuklappen. Das Logo zeigt nun den orangefarbenen Pfeil auf Dunkelblau.' },
