@@ -19,7 +19,7 @@ Die Tabellen `products`, `product_images`, `admins` und `sessions` sowie der Sto
 2. `supabase/migrations/202610190002_order_stock_fulfillment.sql`
 3. `supabase/migrations/202610200001_category_design_settings.sql`
 
-Die Migrationen ergänzen Kategorien, Bestellungen, dynamische Suchbegriffe, Kategorie-Designoptionen und das einmalige Abbuchen der Bestellmengen. Sie müssen vor dem Start der aktualisierten App ausgeführt werden.
+Die Migrationen ergänzen Kategorien, Bestellungen, dynamische Suchbegriffe, Kategorie-Designoptionen und das einmalige Abbuchen der Bestellmengen. Sie müssen vor dem Start der aktualisierten App ausgeführt werden. Fehlt nur Migration 003, bleiben die Kategorien mit Standarddesign verfügbar; zum Speichern individueller Kategoriegrößen und -farben muss diese Migration ausgeführt werden.
 
 Wenn die öffentliche Seite meldet, dass Kategorien nicht geladen werden können, oder die Verwaltung trotz vorhandener Produkte einen Datenbankfehler anzeigt, öffne in Supabase den **SQL Editor** und führe alle Dateien aus `supabase/migrations/` der Reihe nach aus. Danach müssen die Änderungen am Server und an der Webseite veröffentlicht werden. Solange die Shop-Migration fehlt, kann die öffentliche Seite vorhandene Produkte weiterhin über „Alle Produkte“ anzeigen; die selbst verwalteten Kategorien benötigen die Migration.
 

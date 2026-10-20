@@ -54,10 +54,16 @@ const isMissingShopSchema = (error: { code?: string; message: string }) =>
   ['42P01', '42703', 'PGRST200', 'PGRST204', 'PGRST205'].includes(error.code || '') ||
   /could not find the table|could not find a relationship|column .* does not exist|relation .* does not exist/i.test(error.message)
 const shopMigrationMessage = 'Die Shop-Datenbank ist noch nicht vollständig eingerichtet. Bitte führe die SQL-Dateien in supabase/migrations/ der Reihe nach im Supabase SQL Editor aus.'
+const categoryDesignMigrationMessage = 'Kategorie-Designs benötigen die Migration 202610200001_category_design_settings.sql. Die Kategorien selbst bleiben verfügbar.'
+const isMissingCategoryDesignSettings = (error: { code?: string; message: string }) =>
+  ['42703', 'PGRST204'].includes(error.code || '') && /design_settings/i.test(error.message)
 
 const categoryDesigns = ['Kachel', 'Panorama', 'Kompakt'] as const
 type CategoryDesignSettings = { width: number; height: number; borderWidth: number; borderColor: string; backgroundColor: string; textColor: string }
+type CategoryRow = { id: string; name: string; sort_order: number; design: string; design_settings?: unknown; preview_mode: 'products' | 'upload'; preview_image: string | null }
 const defaultCategoryDesignSettings: CategoryDesignSettings = { width: 340, height: 465, borderWidth: 1, borderColor: '#d9e1e7', backgroundColor: '#f7f9fa', textColor: '#172a3c' }
+const categorySelect = 'id,name,sort_order,design,design_settings,preview_mode,preview_image'
+const legacyCategorySelect = 'id,name,sort_order,design,preview_mode,preview_image'
 const isHexColor = (value: unknown): value is string => typeof value === 'string' && /^#[\da-f]{6}$/i.test(value)
 const parseCategoryDesignSettings = (value: unknown): CategoryDesignSettings | null => {
   if (!isRecord(value)) return null
@@ -68,7 +74,7 @@ const parseCategoryDesignSettings = (value: unknown): CategoryDesignSettings | n
   if (!isHexColor(borderColor) || !isHexColor(backgroundColor) || !isHexColor(textColor)) return null
   return { width: Number(width), height: Number(height), borderWidth: Number(borderWidth), borderColor, backgroundColor, textColor }
 }
-const categoryPayload = (row: { id: string; name: string; sort_order: number; design: string; design_settings?: unknown; preview_mode: 'products' | 'upload'; preview_image: string | null }, productIds: string[]) => ({
+const categoryPayload = (row: CategoryRow, productIds: string[]) => ({
   id: row.id,
   name: row.name,
   sortOrder: row.sort_order,
@@ -78,6 +84,13 @@ const categoryPayload = (row: { id: string; name: string; sort_order: number; de
   previewImageUrl: row.preview_image ? supabase.storage.from(storageBucket).getPublicUrl(row.preview_image).data.publicUrl : null,
   productIds,
 })
+const loadCategories = async () => {
+  const result = await supabase.from('categories').select(categorySelect).order('sort_order', { ascending: true })
+  if (!result.error || !isMissingCategoryDesignSettings(result.error)) return result
+
+  console.warn('Category design migration is not applied; loading categories with default design settings:', result.error.message)
+  return supabase.from('categories').select(legacyCategorySelect).order('sort_order', { ascending: true })
+}
 
 const auth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const token = req.cookies.admin_session
@@ -92,7 +105,7 @@ const auth = async (req: express.Request, res: express.Response, next: express.N
 }
 
 app.get('/api/categories', async (_req, res) => {
-  const { data: categories, error } = await supabase.from('categories').select('id,name,sort_order,design,design_settings,preview_mode,preview_image').order('sort_order', { ascending: true })
+  const { data: categories, error } = await loadCategories()
   if (error) {
     console.error('Category query failed:', error.code, error.message)
     return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: 'Kategorien sind derzeit nicht verfügbar.' })
@@ -173,7 +186,7 @@ app.post('/api/admin/orders/:token/fulfill', auth, async (req, res) => {
 })
 
 app.get('/api/admin/categories', auth, async (_req, res) => {
-  const { data: categories, error } = await supabase.from('categories').select('id,name,sort_order,design,design_settings,preview_mode,preview_image').order('sort_order', { ascending: true })
+  const { data: categories, error } = await loadCategories()
   if (error) {
     console.error('Admin category query failed:', error.code, error.message)
     return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: isMissingShopSchema(error) ? shopMigrationMessage : 'Kategorien konnten nicht geladen werden.' })
@@ -210,7 +223,15 @@ app.post('/api/admin/categories', auth, async (req, res) => {
 
 app.patch('/api/admin/categories/:id', auth, upload.single('previewImage'), async (req, res) => {
   const id = String(req.params.id)
-  const { data: current, error: lookupError } = await supabase.from('categories').select('id,name,sort_order,design,design_settings,preview_mode,preview_image').eq('id', id).maybeSingle()
+  let hasDesignSettingsColumn = true
+  let { data: current, error: lookupError } = await supabase.from('categories').select(categorySelect).eq('id', id).maybeSingle()
+  if (lookupError && isMissingCategoryDesignSettings(lookupError)) {
+    hasDesignSettingsColumn = false
+    console.warn('Category design migration is not applied; category updates will use default design settings:', lookupError.message)
+    const legacyResult = await supabase.from('categories').select(legacyCategorySelect).eq('id', id).maybeSingle()
+    current = legacyResult.data
+    lookupError = legacyResult.error
+  }
   if (lookupError) return res.status(500).json({ error: 'Kategorie konnte nicht geladen werden.' })
   if (!current) return res.status(404).json({ error: 'Kategorie nicht gefunden.' })
   let submittedDesignSettings: unknown
@@ -223,10 +244,13 @@ app.patch('/api/admin/categories/:id', auth, upload.single('previewImage'), asyn
     ? parseCategoryDesignSettings(current.design_settings) || defaultCategoryDesignSettings
     : parseCategoryDesignSettings(submittedDesignSettings)
   if (!designSettings) return res.status(400).json({ error: 'Ungültige Design-Einstellungen. Prüfe Größe, Rahmenstärke und Farben.' })
+  const hasCustomDesignSettings = JSON.stringify(designSettings) !== JSON.stringify(defaultCategoryDesignSettings)
+  if (!hasDesignSettingsColumn && hasCustomDesignSettings) return res.status(503).json({ error: categoryDesignMigrationMessage })
   if (id === 'all-products') {
     const design = String(req.body?.design ?? current.design)
     if (!categoryDesigns.includes(design as typeof categoryDesigns[number])) return res.status(400).json({ error: 'Ungültiges Kategorie-Design.' })
-    const { error } = await supabase.from('categories').update({ design, design_settings: designSettings }).eq('id', id)
+    const updates = hasDesignSettingsColumn ? { design, design_settings: designSettings } : { design }
+    const { error } = await supabase.from('categories').update(updates).eq('id', id)
     if (error) return res.status(500).json({ error: 'Design für „Alle Produkte“ konnte nicht gespeichert werden.' })
     return res.json({ ok: true })
   }
@@ -257,7 +281,14 @@ app.patch('/api/admin/categories/:id', auth, upload.single('previewImage'), asyn
     const { error } = await supabase.storage.from(storageBucket).upload(previewImage, file.buffer, { contentType: file.mimetype, upsert: false })
     if (error) return res.status(500).json({ error: 'Kategorie-Bild konnte nicht gespeichert werden.' })
   }
-  const { error: updateError } = await supabase.from('categories').update({ name, design, design_settings: designSettings, preview_mode: previewMode, preview_image: previewMode === 'upload' ? previewImage : null }).eq('id', id)
+  const updates = {
+    name,
+    design,
+    ...(hasDesignSettingsColumn ? { design_settings: designSettings } : {}),
+    preview_mode: previewMode,
+    preview_image: previewMode === 'upload' ? previewImage : null,
+  }
+  const { error: updateError } = await supabase.from('categories').update(updates).eq('id', id)
   if (updateError) return res.status(500).json({ error: 'Kategorie konnte nicht gespeichert werden.' })
   const { error: deleteError } = await supabase.from('product_categories').delete().eq('category_id', id)
   if (deleteError) return res.status(500).json({ error: 'Produktzuordnungen konnten nicht aktualisiert werden.' })
