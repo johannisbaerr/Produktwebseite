@@ -56,11 +56,24 @@ const isMissingShopSchema = (error: { code?: string; message: string }) =>
 const shopMigrationMessage = 'Die Shop-Datenbank ist noch nicht vollständig eingerichtet. Bitte führe die SQL-Dateien in supabase/migrations/ der Reihe nach im Supabase SQL Editor aus.'
 
 const categoryDesigns = ['Kachel', 'Panorama', 'Kompakt'] as const
-const categoryPayload = (row: { id: string; name: string; sort_order: number; design: string; preview_mode: 'products' | 'upload'; preview_image: string | null }, productIds: string[]) => ({
+type CategoryDesignSettings = { width: number; height: number; borderWidth: number; borderColor: string; backgroundColor: string; textColor: string }
+const defaultCategoryDesignSettings: CategoryDesignSettings = { width: 340, height: 465, borderWidth: 1, borderColor: '#d9e1e7', backgroundColor: '#f7f9fa', textColor: '#172a3c' }
+const isHexColor = (value: unknown): value is string => typeof value === 'string' && /^#[\da-f]{6}$/i.test(value)
+const parseCategoryDesignSettings = (value: unknown): CategoryDesignSettings | null => {
+  if (!isRecord(value)) return null
+  const { width, height, borderWidth, borderColor, backgroundColor, textColor } = value
+  if (!Number.isInteger(width) || Number(width) < 280 || Number(width) > 500) return null
+  if (!Number.isInteger(height) || Number(height) < 350 || Number(height) > 600) return null
+  if (!Number.isInteger(borderWidth) || Number(borderWidth) < 0 || Number(borderWidth) > 8) return null
+  if (!isHexColor(borderColor) || !isHexColor(backgroundColor) || !isHexColor(textColor)) return null
+  return { width: Number(width), height: Number(height), borderWidth: Number(borderWidth), borderColor, backgroundColor, textColor }
+}
+const categoryPayload = (row: { id: string; name: string; sort_order: number; design: string; design_settings?: unknown; preview_mode: 'products' | 'upload'; preview_image: string | null }, productIds: string[]) => ({
   id: row.id,
   name: row.name,
   sortOrder: row.sort_order,
   design: row.design,
+  designSettings: parseCategoryDesignSettings(row.design_settings) || defaultCategoryDesignSettings,
   previewMode: row.preview_mode,
   previewImageUrl: row.preview_image ? supabase.storage.from(storageBucket).getPublicUrl(row.preview_image).data.publicUrl : null,
   productIds,
@@ -79,7 +92,7 @@ const auth = async (req: express.Request, res: express.Response, next: express.N
 }
 
 app.get('/api/categories', async (_req, res) => {
-  const { data: categories, error } = await supabase.from('categories').select('id,name,sort_order,design,preview_mode,preview_image').order('sort_order', { ascending: true })
+  const { data: categories, error } = await supabase.from('categories').select('id,name,sort_order,design,design_settings,preview_mode,preview_image').order('sort_order', { ascending: true })
   if (error) {
     console.error('Category query failed:', error.code, error.message)
     return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: 'Kategorien sind derzeit nicht verfügbar.' })
@@ -160,7 +173,7 @@ app.post('/api/admin/orders/:token/fulfill', auth, async (req, res) => {
 })
 
 app.get('/api/admin/categories', auth, async (_req, res) => {
-  const { data: categories, error } = await supabase.from('categories').select('id,name,sort_order,design,preview_mode,preview_image').order('sort_order', { ascending: true })
+  const { data: categories, error } = await supabase.from('categories').select('id,name,sort_order,design,design_settings,preview_mode,preview_image').order('sort_order', { ascending: true })
   if (error) {
     console.error('Admin category query failed:', error.code, error.message)
     return res.status(isMissingShopSchema(error) ? 503 : 500).json({ error: isMissingShopSchema(error) ? shopMigrationMessage : 'Kategorien konnten nicht geladen werden.' })
@@ -197,13 +210,23 @@ app.post('/api/admin/categories', auth, async (req, res) => {
 
 app.patch('/api/admin/categories/:id', auth, upload.single('previewImage'), async (req, res) => {
   const id = String(req.params.id)
-  const { data: current, error: lookupError } = await supabase.from('categories').select('id,name,sort_order,design,preview_mode,preview_image').eq('id', id).maybeSingle()
+  const { data: current, error: lookupError } = await supabase.from('categories').select('id,name,sort_order,design,design_settings,preview_mode,preview_image').eq('id', id).maybeSingle()
   if (lookupError) return res.status(500).json({ error: 'Kategorie konnte nicht geladen werden.' })
   if (!current) return res.status(404).json({ error: 'Kategorie nicht gefunden.' })
+  let submittedDesignSettings: unknown
+  try {
+    submittedDesignSettings = typeof req.body?.designSettings === 'string' ? JSON.parse(req.body.designSettings) : req.body?.designSettings
+  } catch {
+    return res.status(400).json({ error: 'Ungültige Design-Einstellungen.' })
+  }
+  const designSettings = submittedDesignSettings === undefined
+    ? parseCategoryDesignSettings(current.design_settings) || defaultCategoryDesignSettings
+    : parseCategoryDesignSettings(submittedDesignSettings)
+  if (!designSettings) return res.status(400).json({ error: 'Ungültige Design-Einstellungen. Prüfe Größe, Rahmenstärke und Farben.' })
   if (id === 'all-products') {
     const design = String(req.body?.design ?? current.design)
     if (!categoryDesigns.includes(design as typeof categoryDesigns[number])) return res.status(400).json({ error: 'Ungültiges Kategorie-Design.' })
-    const { error } = await supabase.from('categories').update({ design }).eq('id', id)
+    const { error } = await supabase.from('categories').update({ design, design_settings: designSettings }).eq('id', id)
     if (error) return res.status(500).json({ error: 'Design für „Alle Produkte“ konnte nicht gespeichert werden.' })
     return res.json({ ok: true })
   }
@@ -234,7 +257,7 @@ app.patch('/api/admin/categories/:id', auth, upload.single('previewImage'), asyn
     const { error } = await supabase.storage.from(storageBucket).upload(previewImage, file.buffer, { contentType: file.mimetype, upsert: false })
     if (error) return res.status(500).json({ error: 'Kategorie-Bild konnte nicht gespeichert werden.' })
   }
-  const { error: updateError } = await supabase.from('categories').update({ name, design, preview_mode: previewMode, preview_image: previewMode === 'upload' ? previewImage : null }).eq('id', id)
+  const { error: updateError } = await supabase.from('categories').update({ name, design, design_settings: designSettings, preview_mode: previewMode, preview_image: previewMode === 'upload' ? previewImage : null }).eq('id', id)
   if (updateError) return res.status(500).json({ error: 'Kategorie konnte nicht gespeichert werden.' })
   const { error: deleteError } = await supabase.from('product_categories').delete().eq('category_id', id)
   if (deleteError) return res.status(500).json({ error: 'Produktzuordnungen konnten nicht aktualisiert werden.' })
@@ -390,6 +413,33 @@ app.patch('/api/admin/products/:id', auth, upload.array('images', 8), async (req
   if (error) return res.status(500).json({ error: 'Produkt konnte nicht gespeichert werden.' })
   const files = (req.files as Express.Multer.File[]) || []
   if (files.length) { const { data: last } = await supabase.from('product_images').select('sort_order').eq('product_id', id).order('sort_order', { ascending: false }).limit(1).maybeSingle<{ sort_order: number }>(); try { await uploadImages(id, files, (last?.sort_order ?? -1) + 1) } catch { return res.status(500).json({ error: 'Neue Produktbilder konnten nicht gespeichert werden.' }) } }
+  res.json({ ok: true })
+})
+
+app.post('/api/admin/products/:id/images/:imageId/background-removal', auth, upload.single('image'), async (req, res) => {
+  const productId = Number(req.params.id)
+  const imageId = Number(req.params.imageId)
+  const file = req.file
+  if (!Number.isSafeInteger(productId) || productId < 1 || !Number.isSafeInteger(imageId) || imageId < 1) return res.status(400).json({ error: 'Ungültige Produkt- oder Bild-ID.' })
+  if (!file || (file.mimetype !== 'image/webp' && file.mimetype !== 'image/png')) return res.status(400).json({ error: 'Das freigestellte Bild muss als PNG oder WebP übertragen werden.' })
+  const { data: image, error: lookupError } = await supabase.from('product_images').select('filename').eq('id', imageId).eq('product_id', productId).maybeSingle<{ filename: string }>()
+  if (lookupError) return res.status(500).json({ error: 'Produktbild konnte nicht geladen werden.' })
+  if (!image) return res.status(404).json({ error: 'Bild nicht gefunden.' })
+
+  const baseName = file.originalname.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_') || 'produktbild'
+  const filename = `${productId}/${crypto.randomUUID()}-${baseName}.${file.mimetype === 'image/webp' ? 'webp' : 'png'}`
+  const { error: uploadError } = await supabase.storage.from(storageBucket).upload(filename, file.buffer, { contentType: file.mimetype, upsert: false })
+  if (uploadError) return res.status(500).json({ error: 'Freigestelltes Bild konnte nicht hochgeladen werden.' })
+
+  const { error: updateError } = await supabase.from('product_images').update({ filename }).eq('id', imageId).eq('product_id', productId)
+  if (updateError) {
+    const { error: cleanupError } = await supabase.storage.from(storageBucket).remove([filename])
+    if (cleanupError) console.error('Background removal rollback failed:', cleanupError.message)
+    return res.status(500).json({ error: 'Freigestelltes Bild konnte nicht mit dem Produkt verknüpft werden.' })
+  }
+
+  const { error: removeError } = await supabase.storage.from(storageBucket).remove([image.filename])
+  if (removeError) console.error('Original product image cleanup failed after background removal:', removeError.message)
   res.json({ ok: true })
 })
 

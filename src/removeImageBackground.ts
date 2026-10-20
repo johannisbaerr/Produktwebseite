@@ -48,7 +48,14 @@ export async function removeImageBackground(file: File) {
     const inputContext = inputCanvas.getContext('2d', { willReadFrequently: true })
     if (!inputContext) throw new Error('Die Bildverarbeitung wird von diesem Browser nicht unterstützt.')
 
-    inputContext.drawImage(image, 0, 0, modelSize, modelSize)
+    const inputScale = Math.min(modelSize / image.width, modelSize / image.height)
+    const fittedWidth = Math.max(1, Math.round(image.width * inputScale))
+    const fittedHeight = Math.max(1, Math.round(image.height * inputScale))
+    const offsetX = Math.floor((modelSize - fittedWidth) / 2)
+    const offsetY = Math.floor((modelSize - fittedHeight) / 2)
+    inputContext.fillStyle = '#808080'
+    inputContext.fillRect(0, 0, modelSize, modelSize)
+    inputContext.drawImage(image, offsetX, offsetY, fittedWidth, fittedHeight)
     const pixels = inputContext.getImageData(0, 0, modelSize, modelSize).data
     const planeSize = modelSize * modelSize
     const input = new Float32Array(planeSize * 3)
@@ -71,9 +78,12 @@ export async function removeImageBackground(file: File) {
 
     let minimum = Infinity
     let maximum = -Infinity
-    for (const alpha of output.data) {
-      minimum = Math.min(minimum, alpha)
-      maximum = Math.max(maximum, alpha)
+    for (let y = offsetY; y < offsetY + fittedHeight; y++) {
+      for (let x = offsetX; x < offsetX + fittedWidth; x++) {
+        const alpha = output.data[y * modelSize + x]
+        minimum = Math.min(minimum, alpha)
+        maximum = Math.max(maximum, alpha)
+      }
     }
     if (!Number.isFinite(minimum) || maximum - minimum < 0.00001) {
       throw new Error('Der Bildhintergrund konnte nicht zuverlässig erkannt werden.')
@@ -105,9 +115,10 @@ export async function removeImageBackground(file: File) {
       outputCanvas.height = height
       const context = outputCanvas.getContext('2d')
       if (!context) throw new Error('Die Bildverarbeitung wird von diesem Browser nicht unterstützt.')
+      context.imageSmoothingQuality = 'high'
       context.drawImage(image, 0, 0, width, height)
       context.globalCompositeOperation = 'destination-in'
-      context.drawImage(maskCanvas, 0, 0, width, height)
+      context.drawImage(maskCanvas, offsetX, offsetY, fittedWidth, fittedHeight, 0, 0, width, height)
       blob = await canvasBlob(outputCanvas)
       if (blob.size <= maxUploadSize) break
       if (scale <= 0.35) throw new Error(`Das freigestellte Bild „${file.name}“ ist trotz Komprimierung zu groß.`)

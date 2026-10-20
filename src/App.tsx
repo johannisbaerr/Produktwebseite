@@ -4,12 +4,14 @@ import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCenter, 
 import type { DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import type { CSSProperties } from 'react'
 import { removeImageBackground } from './removeImageBackground'
 import './App.css'
 
 type Image = { id: number; url: string; originalName: string }
 type Product = { id: number; name: string; description: string; priceCents: number; stock: number; status: 'active' | 'unlisted'; searchTerms?: string[]; categoryIds?: string[]; images: Image[]; updatedAt: string }
-type Category = { id: string; name: string; sortOrder: number; design: string; previewMode: 'products' | 'upload'; previewImageUrl: string | null; productIds: number[] }
+type CategoryDesignSettings = { width: number; height: number; borderWidth: number; borderColor: string; backgroundColor: string; textColor: string }
+type Category = { id: string; name: string; sortOrder: number; design: string; designSettings: CategoryDesignSettings; previewMode: 'products' | 'upload'; previewImageUrl: string | null; productIds: number[] }
 type CartItem = { productId: number; quantity: number }
 type Order = { createdAt: string; fulfilledAt: string | null; items: { productId: number; name: string; priceCents: number; quantity: number }[] }
 
@@ -18,7 +20,16 @@ const emptyForm = { name: '', description: '', price: '', stock: '', status: 'ac
 const apiBaseUrl = import.meta.env.VITE_API_URL || 'https://shop-api-c4sq.onrender.com'
 const publicProductsCacheKey = `shop:public-products:${apiBaseUrl}`
 const cartStorageKey = 'amspind:cart'
-const allProductsCategory: Category = { id: 'all-products', name: 'Alle Produkte', sortOrder: 0, design: 'Kachel', previewMode: 'products', previewImageUrl: null, productIds: [] }
+const defaultCategoryDesignSettings: CategoryDesignSettings = { width: 340, height: 465, borderWidth: 1, borderColor: '#d9e1e7', backgroundColor: '#f7f9fa', textColor: '#172a3c' }
+const categoryCardStyle = (settings: CategoryDesignSettings): CSSProperties => ({
+  '--category-width': `${settings.width}px`,
+  '--category-height': `${settings.height}px`,
+  '--category-border-width': `${settings.borderWidth}px`,
+  '--category-border-color': settings.borderColor,
+  '--category-background': settings.backgroundColor,
+  '--category-text': settings.textColor,
+} as CSSProperties)
+const allProductsCategory: Category = { id: 'all-products', name: 'Alle Produkte', sortOrder: 0, design: 'Kachel', designSettings: defaultCategoryDesignSettings, previewMode: 'products', previewImageUrl: null, productIds: [] }
 const categoryDesigns = ['Kachel', 'Panorama', 'Kompakt']
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 
@@ -170,7 +181,7 @@ function CategoryPreview({ category, products }: { category: Category; products:
 function CategoryDesignPreview({ category, products }: { category: Category; products: Product[] }) {
   return <div className="category-design-preview">
     <p className="category-preview-heading">Vorschau der Kategorie</p>
-    <div className="category-promo-card">
+    <div className="category-promo-card" style={categoryCardStyle(category.designSettings)}>
       <CategoryPreview category={category} products={products} />
       <div className="category-promo-copy"><span className="category-promo-kicker">Amspind Auswahl</span><h2>{category.name || 'Kategoriename'}</h2><p>{products.length} {products.length === 1 ? 'Produkt' : 'Produkte'} für deine Pause</p><span className="category-promo-link">Jetzt entdecken <span aria-hidden="true">→</span></span></div>
     </div>
@@ -388,7 +399,7 @@ function PublicView({ onAdmin }: { onAdmin: () => void }) {
       {!isFullCatalog && <section className="category-navigation" aria-label="Entdecke Kategorien">
         {loading ? <div className="loading">Kategorien werden geladen ...</div> : <>{loadError && <div className="loading" role="alert">{loadError}</div>}{displayCategories.length ? <><div className="category-track-controls">{displayCategories.length > 3 && <div className="promo-arrows"><button aria-label="Kategorien nach links" onClick={() => categoryCardsRef.current?.scrollBy({ left: -380, behavior: 'smooth' })}>‹</button><button aria-label="Kategorien nach rechts" onClick={() => categoryCardsRef.current?.scrollBy({ left: 380, behavior: 'smooth' })}>›</button></div>}</div><div className="category-promo-track" ref={categoryCardsRef}>{displayCategories.map((category) => {
           const categoryProducts = category.id === 'all-products' ? products : products.filter((product) => category.productIds.includes(product.id))
-          return <button key={category.id} className={`category-promo-card ${category.id === 'all-products' ? 'all-products-category' : ''}`} onClick={() => setSelectedCategory(category.id)}>
+          return <button key={category.id} className={`category-promo-card ${category.id === 'all-products' ? 'all-products-category' : ''}`} style={categoryCardStyle(category.designSettings || defaultCategoryDesignSettings)} onClick={() => setSelectedCategory(category.id)}>
             <CategoryPreview category={category} products={categoryProducts} />
             <div className="category-promo-copy"><span className="category-promo-kicker">Amspind Auswahl</span><h2>{category.name}</h2><p>{categoryProducts.length} {categoryProducts.length === 1 ? 'Produkt' : 'Produkte'} für deine Pause</p><span className="category-promo-link">Jetzt entdecken <span aria-hidden="true">→</span></span></div>
           </button>
@@ -502,6 +513,7 @@ function CategoryManager({ products }: { products: Product[] }) {
   const [name, setName] = useState('')
   const [newCategoryName, setNewCategoryName] = useState('')
   const [design, setDesign] = useState(categoryDesigns[0])
+  const [designSettings, setDesignSettings] = useState(defaultCategoryDesignSettings)
   const [previewMode, setPreviewMode] = useState<'products' | 'upload'>('products')
   const [selectedProducts, setSelectedProducts] = useState<number[]>([])
   const [previewFile, setPreviewFile] = useState<File | null>(null)
@@ -530,6 +542,7 @@ function CategoryManager({ products }: { products: Product[] }) {
   useEffect(() => {
     setName(selected?.name || '')
     setDesign(selected?.design || categoryDesigns[0])
+    setDesignSettings(selected?.designSettings || defaultCategoryDesignSettings)
     setPreviewMode(selected?.previewMode || 'products')
     setSelectedProducts(selected?.productIds || [])
     setPreviewFile(null)
@@ -555,12 +568,13 @@ function CategoryManager({ products }: { products: Product[] }) {
     const data = new FormData()
     data.append('design', design)
     if (selected.id === 'all-products') {
-      try { await request(`/api/admin/categories/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ design }) }); await load() }
+      try { await request(`/api/admin/categories/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ design, designSettings }) }); await load() }
       catch (reason) { setError(reason instanceof Error ? reason.message : 'Design für „Alle Produkte“ konnte nicht gespeichert werden.') }
       finally { setBusy(false) }
       return
     }
     data.append('name', name)
+    data.append('designSettings', JSON.stringify(designSettings))
     data.append('previewMode', previewMode)
     data.append('productIds', JSON.stringify(selectedProducts))
     if (previewFile) data.append('previewImage', previewFile)
@@ -596,6 +610,7 @@ function CategoryManager({ products }: { products: Product[] }) {
     name,
     sortOrder: selected?.sortOrder ?? categories.length,
     design,
+    designSettings,
     previewMode,
     previewImageUrl: previewFile ? previewImageUrl || selected?.previewImageUrl || null : selected?.previewImageUrl || null,
     productIds: selectedProducts,
@@ -618,6 +633,17 @@ function CategoryManager({ products }: { products: Product[] }) {
         <label className={selected.id === 'all-products' ? 'disabled-category-setting' : ''}>Kategoriename<input value={name} disabled={selected.id === 'all-products'} onChange={(event) => setName(event.target.value)} maxLength={80} /></label>
         <label>Design<select value={design} onChange={(event) => setDesign(event.target.value)}>{categoryDesigns.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
         <CategoryDesignPreview category={previewCategory} products={previewProducts} />
+        <details className="category-design-options">
+          <summary>Größe, Rahmen & Farben</summary>
+          <div className="category-design-controls">
+            <label>Kartenbreite <span>{designSettings.width} px</span><input type="range" min="280" max="500" step="10" value={designSettings.width} onChange={(event) => setDesignSettings((current) => ({ ...current, width: Number(event.target.value) }))} /></label>
+            <label>Kartenhöhe <span>{designSettings.height} px</span><input type="range" min="350" max="600" step="10" value={designSettings.height} onChange={(event) => setDesignSettings((current) => ({ ...current, height: Number(event.target.value) }))} /></label>
+            <label>Rahmenstärke <span>{designSettings.borderWidth} px</span><input type="range" min="0" max="8" step="1" value={designSettings.borderWidth} onChange={(event) => setDesignSettings((current) => ({ ...current, borderWidth: Number(event.target.value) }))} /></label>
+            <label className="category-color-setting">Rahmenfarbe<input type="color" value={designSettings.borderColor} onChange={(event) => setDesignSettings((current) => ({ ...current, borderColor: event.target.value }))} /></label>
+            <label className="category-color-setting">Hintergrundfarbe<input type="color" value={designSettings.backgroundColor} onChange={(event) => setDesignSettings((current) => ({ ...current, backgroundColor: event.target.value }))} /></label>
+            <label className="category-color-setting">Schriftfarbe<input type="color" value={designSettings.textColor} onChange={(event) => setDesignSettings((current) => ({ ...current, textColor: event.target.value }))} /></label>
+          </div>
+        </details>
         <label className={selected.id === 'all-products' ? 'disabled-category-setting' : ''}>Vorschaubild<select disabled={selected.id === 'all-products'} value={previewMode} onChange={(event) => setPreviewMode(event.target.value as 'products' | 'upload')}><option value="products">Aus Produktbildern wechseln</option><option value="upload">Eigenes Bild hochladen</option></select></label>
         {previewMode === 'upload' && <label className={`file-drop ${selected.id === 'all-products' ? 'disabled-category-setting' : ''}`}>Kategorie-Bild<input disabled={selected.id === 'all-products'} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event) => setPreviewFile(event.target.files?.[0] || null)} /><span>{previewFile?.name || (selected.previewImageUrl ? 'Bild vorhanden – neues Bild auswählen zum Ersetzen' : 'Bild auswählen')}</span></label>}
         <fieldset className={`product-picker ${selected.id === 'all-products' ? 'disabled-category-setting' : ''}`} disabled={selected.id === 'all-products'}><legend>Produkte dieser Kategorie</legend>{products.length ? products.map((product) => <label key={product.id} className="product-choice"><input type="checkbox" checked={selected.id === 'all-products' || selectedProducts.includes(product.id)} onChange={(event) => setSelectedProducts((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} /><span>{product.name} <small>{product.status === 'unlisted' ? '· Nicht gelistet (öffentlich ausgeblendet)' : ''}</small></span></label>) : <p className="muted">Noch keine Produkte angelegt.</p>}</fieldset>
@@ -628,6 +654,8 @@ function CategoryManager({ products }: { products: Product[] }) {
 
 function ChangeNotes() {
   const entries = [
+    { date: '2026-10-20', title: 'Kategorie-Designs individuell anpassen', details: 'Im ausklappbaren Bereich „Größe, Rahmen & Farben“ lassen sich Größe, Rahmen und Farben jeder Kategorie einschließlich „Alle Produkte“ einstellen. Die Vorschau zeigt die Änderungen direkt.' },
+    { date: '2026-10-20', title: 'Produktbilder gesammelt freistellen', details: 'Im Produktbereich können alle vorhandenen Produktbilder nacheinander lokal im Browser freigestellt werden. Erfolgreich bearbeitete Shop-Bilder werden ersetzt; Fehler einzelner Bilder bleiben sichtbar.' },
     { date: '2026-10-20', title: '„Alle Produkte“ im Admin bearbeiten', details: '„Alle Produkte“ kann jetzt im Kategorie-Editor ausgewählt und im Design geändert werden. Einstellungen, die für die feste Kategorie nicht verfügbar sind, werden deaktiviert angezeigt.' },
     { date: '2026-10-20', title: 'Kategorien sortieren und Designs vorab ansehen', details: '„Alle Produkte“ kann jetzt zusammen mit den übrigen Kategorien per Drag-and-drop sortiert werden. Der Kategorieneditor zeigt eine Live-Vorschau für Kachel, Panorama und Kompakt; Admin-Interaktionen erhielten dezente Hover- und Fokus-Effekte.' },
     { date: '2026-10-19', title: 'Zurücknavigation und Admin-Bereiche verbessert', details: 'Der Handy-Zurückknopf schließt den Warenkorb und stellt die vorherige Ansicht wieder her. Die öffentliche Startseite blendet keine Kategorien-Warnung mehr ein, solange die vorhandene Kategorieansicht weiter nutzbar ist. Admin-Bereiche sind jetzt aufklappbar strukturiert.' },
@@ -706,6 +734,7 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
   const [loadError, setLoadError] = useState('')
   const [draggingProductId, setDraggingProductId] = useState<number | null>(null)
   const [showPassword, setShowPassword] = useState(false)
+  const [backgroundJob, setBackgroundJob] = useState<{ running: boolean; completed: number; total: number; errors: string[] } | null>(null)
   const productsRef = useRef(products)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
   useEffect(() => {
@@ -750,6 +779,43 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
     try { await request(`/api/admin/products/${product.id}`, { method: 'DELETE' }); await load() }
     catch (reason) { setLoadError(reason instanceof Error ? reason.message : 'Produkt konnte nicht gelöscht werden.') }
   }
+  const removeBackgroundFromAllImages = async () => {
+    const images = allProducts.flatMap((product) => product.images.map((image) => ({ product, image })))
+    if (!images.length) {
+      setLoadError('Es wurden keine Produktbilder zum Freistellen gefunden.')
+      return
+    }
+    if (!window.confirm(`Die Hintergründe aller ${images.length} Produktbilder werden automatisch entfernt und die Bilder im Shop ersetzt. Die Originale solltest du lokal aufbewahren. Fortfahren?`)) return
+
+    setLoadError('')
+    setBackgroundJob({ running: true, completed: 0, total: images.length, errors: [] })
+    const errors: string[] = []
+    for (const [index, { product, image }] of images.entries()) {
+      setBackgroundJob({ running: true, completed: index, total: images.length, errors: [...errors] })
+      try {
+        const response = await fetch(image.url)
+        if (!response.ok) throw new Error(`Bild konnte nicht geladen werden (HTTP ${response.status}).`)
+        const sourceBlob = await response.blob()
+        const sourceFile = new File([sourceBlob], image.originalName || `produkt-${product.id}-${image.id}`, { type: sourceBlob.type || 'image/png' })
+        const processedFile = await removeImageBackground(sourceFile)
+        const data = new FormData()
+        data.append('image', processedFile)
+        await request(`/api/admin/products/${product.id}/images/${image.id}/background-removal`, { method: 'POST', body: data })
+      } catch (reason) {
+        errors.push(`${product.name} — ${image.originalName}: ${reason instanceof Error ? reason.message : 'Freistellen fehlgeschlagen.'}`)
+      }
+      setBackgroundJob({ running: true, completed: index + 1, total: images.length, errors: [...errors] })
+    }
+
+    setBackgroundJob({ running: false, completed: images.length, total: images.length, errors })
+    try {
+      await loadAllProducts()
+      await load()
+    } catch (reason) {
+      setLoadError(reason instanceof Error ? reason.message : 'Produktbilder wurden verarbeitet, aber die aktualisierte Liste konnte nicht geladen werden.')
+    }
+  }
+  const productImageCount = allProducts.reduce((total, product) => total + product.images.length, 0)
   return <div className="admin-shell">
     <header className="admin-header"><a className="brand admin-brand" href="#"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M10 24h23m-10-11 11 11-11 11" /></svg></span>Amspind</a><div className="admin-title"><strong>Produktverwaltung</strong><span>Amspind</span></div><div className="admin-actions"><button className="text-button" onClick={onExit}>Öffentliche Seite</button><button className="logout" onClick={async () => { await request('/api/auth/logout', { method: 'POST' }); setLoggedIn(false) }}>Abmelden</button></div></header>
     <main className="admin-main">
@@ -761,7 +827,8 @@ function AdminView({ onExit, orderToken }: { onExit: () => void; orderToken: str
         </details>
         <details className="admin-accordion products-accordion">
           <summary><span className="accordion-summary-copy"><strong>Produkte</strong><small>{products.length} Produkte · suchen, bearbeiten und sortieren</small></span></summary>
-        <section className="admin-section product-management-panel"><div className="admin-panel-actions"><p className="reorder-hint">{search ? 'Suche leeren, um die Artikelreihenfolge zu ändern.' : 'Artikel am Griffpunkt ziehen, um sie anzuordnen.'}</p><button className="primary-button compact" onClick={() => setEditing('new')}>+ Produkt hinzufügen</button></div>
+        <section className="admin-section product-management-panel"><div className="admin-panel-actions"><p className="reorder-hint">{search ? 'Suche leeren, um die Artikelreihenfolge zu ändern.' : 'Artikel am Griffpunkt ziehen, um sie anzuordnen.'}</p><div className="product-toolbar-actions"><button className="secondary-button" disabled={Boolean(backgroundJob?.running) || productImageCount === 0} onClick={() => { void removeBackgroundFromAllImages() }}>{backgroundJob?.running ? `Freigestellt (${backgroundJob.completed}/${backgroundJob.total})` : `Alle Bilder freistellen · ${productImageCount}`}</button><button className="primary-button compact" onClick={() => setEditing('new')}>+ Produkt hinzufügen</button></div></div>
+          {backgroundJob && <div className={`background-job-status ${backgroundJob.errors.length ? 'has-errors' : ''}`} role={backgroundJob.running ? 'status' : 'region'} aria-live="polite"><strong>{backgroundJob.running ? `Bilder werden freigestellt: ${backgroundJob.completed} von ${backgroundJob.total}` : backgroundJob.errors.length ? `Freistellen abgeschlossen: ${backgroundJob.completed - backgroundJob.errors.length} von ${backgroundJob.total} erfolgreich` : `Alle ${backgroundJob.total} Bilder wurden freigestellt.`}</strong>{backgroundJob.running && <progress max={backgroundJob.total} value={backgroundJob.completed} />}{Boolean(backgroundJob.errors.length) && <details><summary>{backgroundJob.errors.length} Bild(er) konnten nicht freigestellt werden</summary><ul>{backgroundJob.errors.slice(0, 20).map((message) => <li key={message}>{message}</li>)}</ul>{backgroundJob.errors.length > 20 && <p>Weitere {backgroundJob.errors.length - 20} Fehler ausgeblendet.</p>}</details>}</div>}
           <div className="admin-toolbar"><label className="search-box"><span>⌕</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nach Produkt suchen ..." /></label><span>{products.length} Produkte</span></div>
           {reorderError && <div className="form-error">{reorderError}</div>}{loadError && <div className="form-error" role="alert">{loadError}</div>}
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={({ active }) => setDraggingProductId(Number(active.id))} onDragCancel={() => setDraggingProductId(null)} onDragEnd={(event) => { void saveProductOrder(event) }}>
